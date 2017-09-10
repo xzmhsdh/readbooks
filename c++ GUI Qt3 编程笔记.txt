@@ -1,0 +1,1551 @@
+一、QT <==> MFC 的一些概念:
+1.QPainter == CPaintDC
+  QWidget  == CWnd
+  setGeometry == MoveWindow
+  QWidgetStatck == CTabPage
+  setEnabled == EnableWindow
+
+2.双缓冲
+  规则1：使用WNoAutoErase标记来构造窗口，告诉qt在一个绘制事件之前不要擦除这个窗口。
+  规则2：一次绘制每一个像素。
+  eg:
+  void painEvent(QPaintEvent *event)
+  {
+     static QPixmap pixmap; //避免重复分配和释放
+	 QRect rect = event->rect();
+	 
+	 QSize  newsize = rect.size().expandedTo(pixmap.size()); 
+	 pixmap.resize(newsize); 
+	 pixmap.fill(this,rect.topLeft()); //第2个参数指定这个QPixmap的左上角像素对应窗口的哪一个点
+	 
+	 QPainter painter(&pixmap,this); //this传给painter告诉其采用窗口的一些设置，如字体等。
+	 painter.translate(-rect.x(),-rect.y()); //绘制前进行坐标转换
+	 drawMyStuff(&painter);
+	 bitBlt(this,rect.x(),rect.y(),&pixmap,0,0,rect.width(),rect.height()); //全局函数(位块转移)，将像素映射复制到窗口上
+  }
+3.Q_OBJECT //只有加入了Q_OBJECT，才能使用QT中的signal和slot机制。The Q_OBJECT macro at the beginning of the class definition is necessary for all classes that define signals or slots
+  Q_ENUMS(enum1); //告诉moc 在槽函数中用到的enum1是一个枚举类型 
+  Q_PROPERTY(QColor color READ color WRITE setColor) //设置属性color及其getter和setter函数
+
+4.槽
+  和普通c++成员函数一样,可以是虚函数，被重载,公私保护，被其他c++成员函数直接调用，唯一不同的是可以和信号连接到一起.
+  1).一个信号可以被连接到多个槽
+     当一个信号被发射的时候，槽会一个接一个地以任意的顺序被调用
+  2).多个信号可一个被连接到一个槽
+     只要一个信号被发送，槽就会被调用
+  3).一个信号可以被连接到另外一个信号
+     第一个信号被发射，第二个信号也会被发射
+  4).连接可以被移除.对象被删除时，Qt会自动移除和这个对象相关的所有连接.
+     disconnect(sig,SIGNAL(overflow()),this,SLOT(handleerror()));  
+	 
+ 
+ 
+二、QT知识点
+
+1.Qt信号和事件
+  信号:使用窗口部件时，更关心信号
+  事件:在重新实现窗口部件时，需要处理事件  
+
+2.安装事件过滤器(多个事件过滤器被安装到同一个对象,过滤器会被逐个激活，由最近安装到最先安装顺序)
+  step1:目标对象调用installEventFilter()注册监视对象。
+  step2:在监视对象的eventFilter()函数中处理目标对象的事件。
+  eg:
+  this::this(QWidget *parent,const char *name):QDialog(parent,name)
+  {
+    eidt1->installEventFilter(this);
+    eidt2->installEventFilter(this);
+  }
+  bool this::eventFilter(QObject *target,QEvent *event)
+  {
+	if (target == eidt1 || target == eidt2){
+		if (event->type() == QEvent::KeyPress){
+			QKeyEvent *keyEvent = (QKeyEvent*)event;
+			if (keyEven->key() == Key_Space){
+				//todo...
+				return true;
+			}
+		}
+	}
+	return QDialog::eventFilter(target,event);
+  }
+3.Qt事件被处理和被过滤的5种等级
+  1).重新实现特定的事件处理器
+     eg:mousePressEvent(),keyPressEvent(),paintEvent()
+  2).重新实现QObject::event()
+     在事件到达特定的事件处理器之前处理它们
+  3).对QObject安装事件过滤器
+     对象调用installEventFilter(QObject)注册，对象的所有事件首先被发送给监视对象(QObject)的eventFilter()函数
+  4).对QApplication对象安装事件过滤器(qApp唯一的QApplication对象)
+	 一个事件过滤器被注册到qApp中，应用程序中的每个对象的每个事件都会在它们被发送到其他事件过滤器之前，被发送
+	 给这个aApp::eventFilter()函数
+  5).子类化QApplication并重新实现notify()
+     Qt调用QApplication来发送事件，重新实现notify()可在事件过滤器得到所有事件之前拦截它们。事件过滤器更常用，
+	 可以同时有多个事件过滤器，但却只有一个notify()函数
+	 
+4.在耗时操作中保持其他事件的响应
+  1).调用QApplication::exec()就启动了Qt的事件循环,在开始时会发出一些事件来显示和绘制窗口，接着就开始运行事件循环，
+  将发生的事件发给QObject处理。当一个事件被处理时，其他事件被append到事件队列，若某个事件耗时太多，其他事件不能
+  及时响应，可在耗时操作里面频繁调用QApplication::processEvents()来处理任何没有被及时处理的事件(任何绘制事件或者
+  任何用户单击或者键按下事件)，并将控制权返回给调用者。此方法存在危险的情况是:若在耗时操作关闭主窗口或者其他鼠标
+  键盘事件发生，结果是不确定行为，可调用QApplication->eventLoop()->processEvents(QEventLoop::ExcludeuUserInput);
+  来忽略鼠标和键盘事件
+  eg:
+  bool writeFile(const QString &filename)
+  {
+	QFile file(filename);
+	QProgressDialog progress(tr("Saving file..."),tr("Cancel"),NumRows);//没调用show()，进度对话框会根据操作的时间自己决定要不要显示出来
+	progress.setModal(true);
+	for (int row = 0 ;row <NumRows;++row)
+	{
+		progress.setProgress(row); //当前row值自动除以总的步数来计算百分比
+		qApp->processEvents();
+		if (progress.wasCanceled())
+		{
+			file.remove();
+			return false;
+		}
+	}
+	return true;
+  }
+  2).另外一种方式，不在用户请求中执行处理，而是推迟到应用程序闲置下来再处理
+	 实现:一个0ms的定时器，没有要处理的事件时，该定时器就会被触发
+	 eg:
+	 void timerEvent(QTimerEvent *event)
+	 {
+		if (event->timerId() == myTimerId){
+			while (step <MaxStep && !qApp->hasPendingEvents()){
+				preformStep(step);
+				++step;
+			}
+			else{
+				QTable::timerEvent(event);
+			}
+		}
+	 }
+	 hasPendingEvents()返回true，就停止处理并把控制权交给Qt，当Qt处理完它的所有事件
+	 处理将会继续进行
+  3).多线程
+     一个处理用户界面的线程，一个工作线程
+	 
+三、QT常用函数:
+0.QObject
+  startTimer(30ms): 启动定时器并返回timer 的ID
+  killTimer():停止定时器
+  
+1.QImage
+  detach(): 深度复制被保存到图像中的数据，图像数据可能被保存到ROM，所以必须调用
+  QImage::rect().contains(pt.x,pt.y);
+2.QWidget
+  
+
+  update():重新绘制窗口部件,不立即刷新，多次调用被qt压缩成一个单一绘制事件，避免闪烁
+  repaint():强制一个立即的重新绘制事件
+  WStaticContents:通常窗口大小改变后qt会绘制整个可视区域。但此变量控制绘制事件的区域严格界定
+  为没被显示的部分，新大小小于原大小，则没有绘制事件被生成。(只适用于内容不依赖于窗口大小的窗口)
+  ex-eg:
+   void refreshPixmap()
+   {
+	  pixmap.resize(size()); //重新定义像素映射的大小为窗口大小，pixmap为类的一个成员变量
+	  pixmap.fill(this,0,0); //使用窗口的擦除颜色填充它
+	  QPainter painter(&pixmap,this); //在这个像素映射上调用drawGrid,drawCurves来执行绘制
+	  drawGrid(&painter);
+	  drawCurves(&painter);
+	  update();              //为整个窗口预约一个绘制事件，这个像素映射绘会在paintEvent()函数中被复制到窗口中
+   } 
+   scroll(-1,0):调用scroll()可更有效率并避免闪烁，它只是简单地移动屏幕上存在的像素，且只对这个窗口新的需要绘制的区域
+				生产绘制事件。
+  
+  
+  setBackgroundMode(PaletteDark);
+  setFocusPolicy(StrongFocus); //让窗口可接受通过单击或按下Tab而来的焦点
+  
+  updateGeometry():告诉所有包含窗口部件的布局，窗口部件大小改变，布局自适应新的大小
+  eg:
+  void setText(const QString &newText)
+  {
+	myText = newText;
+	update();
+	updateGeometry();
+  }
+  
+  palette():返回类型QPalette的调色板对象,active(),inactive,disabled()可得到其窗口部件的状态颜色组
+  colorGroup():返回窗口部件当前状态的颜色组
+  
+  setCursor():鼠标在某个特殊窗口上使用的光标形状
+  QApplication::setOverrideCursor():为整个应用程序设置光标形状
+  QApplication::restoreOverrideCursor()取消设置光标形状。
+  
+  isHidden()
+  show() 非模态，exec()模态
+  setFocus()
+  
+  fontMetrics():返回一个QFontMetrics对象，可以查询窗口的字体信息
+  
+  clipboard()：返回一个指向应用程序的QClipboard对象的指针,处理系统剪贴板很容易
+  :调用setText(),setImage(),setPixmap()把数据放到剪贴板中，并调用text(),image(),
+  pixmap()来重新获得数据
+  eg:
+	void MyTable::copy()
+	{
+	  QApplication::clipboard()->setData(dragObject());
+	}
+	void MyTable::paste()
+	{
+	  QMimeSource *source = QApplication::clipboard()->data();
+	  if (CellDrag::canDecode(source)){
+		QString str;
+		CellDrag::decode(source,str);
+	  }
+	}
+  
+  事件:
+  mousePressEvent():鼠标按下
+  mouseMoveEvent():鼠标移动
+  mouseReleaseEvent():鼠标释放
+  mouseDoubleClickEvent(QMouseEvent *event);
+  keyPressEvent():用户按下一个键且窗口拥有焦点时，其会被调用
+  wheelEvent():滚轮事件
+  closeEvent():重写操作关闭前的动作
+  
+ 
+3.QPainter
+  setPen,drawLine,drawImagePixel,fillRect,drawText,drawRect
+  
+4.QRegin:
+  rect():返回需要重新绘制的区域的QRect数组。
+  eg:
+  QMemArray<QRect> rects  = event->region().rects();
+  for (int i = 0; i < (int)rects.size();i++)
+    bitBlt(this,rects[i].topLeft,&pixmap,rects[i]);
+
+5.QStyle:子类化QStyle可以自定义风格
+  style():返回窗口风格
+  
+6.QKeyEvent
+   key():返回键值:Key_Plus、Key_Down,Key_Up
+   state():获取如Shift、Ctrl、Alt之类的修饰键
+7.QPen
+  eg:
+  QPen quiteDark = colorGroup().dark().light();
+  QPen light = colorGroup().light();
+  
+8.QLayout
+  QHBoxLayout():
+  QVBoxLayout():
+  QGridLayout():  
+  
+9.QSettings
+  setPath()
+  beginGroup()
+  writeEntry()
+  readEntry()
+  endGroup()
+  eg:
+  void writeSettings()
+  {
+     QSettings settings;
+	 settings.setPath("software-inc.com","MailClient");
+	 settings.beginGroup("/MailClient");
+	 
+	 QString str;
+	 QTextOStream out1(&str);
+	 out1 << *horizontalSpliter;
+	 settings.writeEntry("/horizontalSpliter",str);
+	 settings.endGroup();
+  }
+  void readSettings()
+  {
+      QSettings settings;
+	  settings.setPath("software-inc","MailClient");
+	  settings.beginGroup("/MailClient");
+	  
+	  QString str = settings.readEntry("/horizontalSpliter");
+	  QTextIStream in1(&str1);
+	  in1 >> *horizontalSpliter;
+	  settings.endGroup();
+  }
+
+10.QApplication
+   setMainWidget():设置app的主窗口部件
+     
+11.QScrolView:窗口部件需要滚动条的，可将其实现为QScrollView的子类
+   setCaption(QObject::tr("Icon Editor")):
+   setHScrollBarMode(QScrolView::AlwaysOn);
+   setVScrollBarMode(QScrolView::AlwaysOn);
+  
+12.QString
+   prepend():
+   eg:
+   QString text = tr("%1 %2").arg(numVisibleEditors+1).arg(win->cpation));
+   QString str = QString(Dlg:%1 %2 %3').arg(1).arg(2).arg(3));
+   eg:
+   QString str = QApplication::clipboard()->text();
+   QTextIStream in(&str);
+   QString tag;
+   in >> tag;
+   
+   QStringList::const_iterator it = list.begin();
+   while (it != list.end()){
+        QStringList fields = QStringList::split(":",*it);
+		QString title = QStyleSheet::escape(fields[0]);
+		QString body  = QStyleSheet::escape(fields[1]);
+		++it;
+   }
+
+13.QEvent
+   eg:
+   void QWidget::KeyPressEvent(QKeyEvent *event)
+   {
+	  switch(event->key()){
+		case Key_Home:
+		  if (event->state() & ControlButton)
+		  { //todo...}
+		  break;
+		case Key_End:
+		  //todo...
+		default:
+		  QWidget::keyPressEvent(event);
+	  }
+   }
+   bool QWidget::event(QEvent *event)
+   {
+	  if(event->type() == QEvent::KeyPress){
+		QKeyEvent *keyEvent = (QKeyEvent*)event;
+		if(keyEvent->key() == Key_Tab){
+				//todo...
+				return true;
+		}
+	  }
+	  return QWidget::event(event);
+   }
+   
+14.QAction(QAccel) 键绑定
+
+15.QTimer
+  start(s,true/false):false：表示是一个重复的定时器,true表示是一个单触发定时器
+
+16.QProcess
+   异步执行外部程序，并保持图形用户界面的响应，使用信号来通知执行的完成情况.  
+ 
+四、Qt图像
+  1.QPainter二维绘制引擎基础
+	把绘制设备传给QPainter的构造函数，QPainter会采用其的一些设置，重要的如pen,brush,font。
+	可通过调用QPainter的setPen(Qt::black),setBrush(Qt::gray),setFont(0来修改这些对象。
+	背景模式：默认为TransparentMode
+	光栅操作(CopyROP,XorROP,NotROP,AndROP,NotAndROP)
+  2.QCanvas基于项的机制可有效处理上千的变化多端的图形项
+  
+  3.OpenGL库
+  
+  4.打印
+  
+  5.自定义拖放
+	const char *CellDrag::format(int index) const
+	{
+	switch(index){
+		case 0:
+		 return "text/csv";
+		case 1:
+		 return "text/html";
+		case 2:
+		 return "text/plain";
+		default:
+		  return 0;
+	}
+	}
+	QByteArray encodeData(const char *format) const
+	{
+	QByteArray data;
+	QTextOStrea out(data);
+
+	if (qstrcmp(format,"text/csv") == 0){
+		out << toCsv();
+	} else if (qstrcmp(format,"text/html") == 0){
+		out << toHtml();
+	} else if (qstrcmp(format,"text/plain") == 0){
+		out << plainText;
+	}
+	return data;
+	}
+	QString toCsv() const
+	{
+	QString out = plainText;
+	out.replace("\\","\\\\");
+	out.replace("\"","\\\"");
+	return out;
+	}
+	QString toHtml() const
+	{
+	QString out = QStyleSheet::escape(plainText);
+	out.replace("\t","<td>");
+	return out;
+	}
+
+五、输入输出I\O
+	读取和写入文件类:QDataStream、QTextStream	
+	访问目录或得到文件信息:QDir、QFileInfo
+	----------------------------------------
+	1.QDataStream:
+	1).支持的Qt数据类型:QByteArray、QFont、QImage、QMap<K,T>、QPixmap,QString,QValueList<T>和QVariant.
+	eg:
+	void saveBinary(const QString &filename)
+	{
+		QFile file(filename); //函数退出时自动关闭文件
+		if (!file.open(IO_WriteOnly){
+			ioError(file,tr("Cannot open file %1 for writig"));
+			return false;
+		}
+		QDataStream out(&file);
+		//out.setVersion(5); //Qt 3.2
+		out << (Q_UINT16)out.version(); //use the latest version of QDataStream write data.
+		out << (Q_UINT32)MagicNumber;
+		writeToStream(out);
+		
+		if (file.status() != IO_OK){ //检查QFile的状态
+			ioError(file,tr("Error writing to file %1"));
+			return false;
+		}
+		return true;
+	}
+	void ioError(const QFile &file,const QString &message)
+	{
+		QMessageBox::warning(0,tr("Gallery"),message.arg(file.name()));
+	}
+	void writeToStream(QDataStream &out)
+	{
+		list<Drawing>::const_iterator it = drawings.begin();
+		while ( it != drawings.end()){
+			out << *it;
+			++it;
+		}
+	}
+	QDataStream &operator<<(QDataStream &out,const Drawing &drawing) //需将其声明为Drawing的友元函数
+	{
+		out << drawing.myTitle << drawing.myArtist << drawing.myYear;
+		return out;
+	}
+	class Drawing{
+		friend QDataStream &operator<<(QDataStream &,const Drawing &);
+		friend QDataStream &operator>>(QDataStream &,Drawing &);
+	  public:
+	  //....
+	};
+	bool loadBinary(const QString &filename)
+	{
+	   QFile file(filename);
+	   if (!file.open(IO_ReadOnly)){
+		  ioError(file,tr("Cannot open file %1 for reading"));
+		  return false;
+	   }
+	   QDataStream in(&file);
+	   //in.setVersion(5);
+	   Q_UINT16 streamVersion;
+	   Q_UINT32 magic;
+	   in >> magic >> streamVersion;
+	   if (magic != MagicNumber){
+		  error(file,tr("File %1 is not a Gallery file"));
+		  return false;
+	   } else if ((int)streamVersion > in.version()){
+		  error(file,tr("File %1 is from a more recent version of the application"));
+		  return false;
+	   }
+	   readFromStream(in);
+	   if (file.status() != IO_OK){
+		  ioError(file,tr("Error reading from file %1"));
+		  return false;
+	   }
+	   return true;
+	}
+	void readFromStream(QDataStream &in)
+	{
+		drawings.clear();
+		while(!in.atEnd()){
+		   Drawing drawing;
+		   in >> drawing;
+		   drawings.push_back(drawing);
+		}
+	}
+	QDataStream &operator>>(QDataStream &in,Drawing &drawing)
+	{
+		in >> drawing.myTitle >> drawing.myArtist >> drawing.myYear;
+		return  in;
+	}
+	2).QDataStream 默认字节序是BigEndian(高位在低字节)
+	   stream.setByteOrder(QDataStream::LittleEndian);
+	3).一次读取或者写入一个文件，可不使用QDataStream，使用QFile的writeBlock(),readAll()
+	  eg:
+	  file.writeBlock(getData()); //写入字节序列
+	  setData(file.readAll());    //读取数据
+	  压缩版本：
+	  file.writeBlock(qCompress(getData()));
+	  setData(qUncompress(file.readAll()));
+	  QByteArray getData()
+	  {
+		QByteArray data;
+		QDataStream out(data,IO_WriteOnly);
+		writeToStream(out);
+		return data;
+	  }
+	  void setData(const QByteArray &data)
+	  {
+		QDataStream in(data,IO_ReadOnly);
+		readFromStream(in);
+	  }
+	2.QTextStream(QChar作为数据的基本单元)
+	  可读写普通文本文件或者HTML,XML等，会进行Unicode和系统本地的8bit编码方式的转换，处理不同操作系统的行尾符
+	  eg:
+	  bool saveText(const QString &filename)
+	  {
+		QFile file(filename);
+		if (!file.open(IO_WriteOnly|IO_Translate)){ //IO_Translate根据目标系统将换行符转为其对应的字符
+			ioError(file,tr("Cannot open file %1 for writing"));
+			return false;
+		}
+		QTextStream out(&file);
+		out.setEncoding(QTextStream::UnicodeUTF8);
+		list<Drawing>::const_iterator it = drawings.begin();
+		while(it != drawings.end()){
+			out << *it;
+			++it;
+		}
+		if (file.status() != IO_OK){
+		   ioError(file,tr("Error writing to file %1"));
+		   return false;
+		}
+		return true;
+	  }
+	  bool loadText(const QString &filename)
+	  {
+		QFile file(filename);
+		if (!file.open(IO_ReadOnly|IO_Translate{
+			ioError(file,tr("Cannot open file %1 for reading"));
+			return false;
+		}
+		drawings.clear();
+		QTextStream in(&file);
+		in.setEncoding(QTextStream::UnicodeUTF8);
+		while(!in.atEnd()){
+			Drawing drawing;
+			in >> drawing;
+			drawings.push_back(drawing);
+		}
+		if(file.status != IO_OK){
+		  ioError(file,tr("Error reading from file %1"));
+		  return false;
+		}
+		return true;
+	  }
+	  QTextStream &operator>>(QTextStream &in,Drawing &drawing)
+	  {
+		QString str = in.readLine();//读一行，或read()读整个文件
+		QStringList fields = QStringList::split(":",str);
+		if (fields.size() == 3){
+			drawing.myTitle = fields[0];
+			drawing.myArtist = fields[1];
+			drawing.myYear = fields[2].toInt();
+		}
+		return in;
+	  }
+	  QString saveToString()
+	  {
+		QString result;
+		QTextOStream out(&result);
+		list<Drawing>::const_iterator it = drawings.begin();
+		while ( it != drawings.end()){
+			out << *it;
+			++it;
+		}
+		return result;
+	  }
+	  void readFromString(const QString &data)
+	  {
+		QString string = data;
+		drawings.clear();
+		QTextIStream in(&string);
+		while(!in.atEnd()){
+			Drawing drawing;
+			in >> drawing;
+			drawings.push_back(drawing);
+		}
+	  }
+	3.QDir:rename(),exists(),mkdir(),rmdir()
+	 eg:
+	 int imageSpace(const QString &path)
+	 {
+		QDir dir(path);
+		QStringList::Iterator it;
+		int size = 0;
+		QStringList files = dir.entryList("*.png *.jpg *.jpeg",QDir::Files);
+		it = files.begin();
+		while (it != files.end()){
+			size += QFileInfo(path,*it).size(); //QFileInfo可访问文件的属性大小，权限，属主和时间戳
+			++it;
+		}
+		QStringList dirs = dir.entryList(QDir::Dirs);
+		it = dirs.begin();
+		while (it != dirs.end()){
+			if (*it != "." && *it != ".."){
+				size += imageSpace(path + "/" +*it); //目录路径+子目录名称(*it)
+			}
+			++it;
+		}
+		return size;
+	 }
+	  
+六、容器类(若目标平台上STL是可用的,可不使用Qt提供的容器类)
+    1.Vector(随机访问快，insert()和erase()慢)：STL:std::vector<T> <==> QT:QValueVector<T>
+	  可存储类型:int,double,指针或是有默认构造(或不需要参数的构造)、复制构造和赋值操作符的类(QDateTime,
+	  QRegExp,QString,QVariant),继承QObject的qt类不能使用，因为它们都没有实现复制构造函数和赋值操作符,
+	  但可以保存它们的指针。
+	  eg:
+	  for (int i =0; i < (int)films.size();++i)
+	  {
+		cerr << films[i].title().ascii() << endl;
+	  }
+	  vector<Film>::const_iterator it = films.begin(); //typedef iterator T *,typedef const_iterator const T*
+	  while (it != films.end()){
+		cerr << (*it).title().ascii() << endl;
+	    ++it;
+	  }
+	  vector<Film>::iterator it = find(films.begin(),films.end(),Film(2812)); //aFind()
+	  if (it != films.end()) filems.erase(it);
+	  sort(films.begin(),filems.end());
+	  //一旦排序后可使用binary_search()查找
+	  int id = 2812;
+	  if (binary_search(filems.begin(),filems.end(),Film(id)))
+	    cerr<<"Found" << id <<endl;
+ 
+	2.List(随机访问慢,insert()和erase()快)：STL: std::list<T> <==> QT: QValueList<T>
+	  使用push_back或insert可以添加新的项,和vector不同在开始或者中间插入不太耗时间
+	  没有提供[]操作
+	  Qt中若要遍历一个函数的返回值,需要制作这个列表的一个备份并在这个备份中遍历,
+      QSplitter::sizes()返回QValueList<int>
+      eg:
+      QValueList<int> list = splitter->sizes();
+	  QValueList<int>::const_iterator it = list.begin();
+	  while (it != list.end()){
+		do_something(*it);
+		++it;
+	  }
+	3.Map(具有很好的随机访问和插入性能): STL:std::map<K,T> <==> QT: QMap<K,T>
+	  eg1:
+	  map<int,Film>::const_iterator it = films.begin();
+	  while (it != films.end()){
+		cerr << (*it).first << ":" << (*it).second.title().ascii() << endl; ++it;
+	  }
+	  it->first、it->second方式没有(*it).first、(*it).second方式更具有可移植性
+	  
+	  eg2:
+	  QMap<int,Film>::const_iterator it = films.begin();
+	  while (it != films.end()){
+		cerr << it.key() << ":" << it.data().title().ascii() << endl; ++it;
+	  }
+	  处理小数据集时:
+	  QMap<K,T>::keys()   返回映射的键的QValueList
+	  QMap<K,T>::values() 返回映射的值的QValueList
+	  
+	  []:插入和读取，如读取一个不存在的键值,将会创建以此键值和空值创建一个新项，为避免可
+	  用find()来读取项
+	  eg:
+	  map<int,Film>::const_iterator it = films.find(1817);
+	  if (it != films.end())
+		cerr << "Found" << (*it).second.title().ascii() << endl;
+ 
+	  为同一个键保存多个值multimap<K,T>，若只存储键set<K>或multiset<K>，Qt中无这些的等价类
+	
+	4.基于指针的容器
+	 1).QPtrVector<T>存储一个指针的向量，须自定义大小和插入值
+	    QPtrVector<Film> films(2);
+		films.setAutoDelete(true);  //自动删除属性,容器被删除或remove(),clear()时项被自动删除
+		films.insert(0,new Film(1812,"this",85));
+		films.insert(1,new Film(1823,"is",23));
+	 2).QPtrList,QPrtListIterator<T>
+	 3).QMemArray<T>,其子类QByteArray(QMemArray<char>)和QPointArray(QMemArray<QPoint>)非常常用
+	    eg：
+		QByteArray bytes(3);
+		bytes[0] = 'A';
+		bytes[1] = 'B';
+		bytes[2] = 'C';
+		if (bytes.find('A') != -1) //QMemArray<T>::find()
+		   cerr << "Found" << endl;
+		QMemArray<T>及其子类的缺点:它们是明显共享的(浅拷贝),原对象和备份对象使用同一份数据。
+		而隐含共享(深拷贝)不存在这个问题,解决方式是复制一个容器时调用copy()强制做一个深备份
+		duplicate = bytes.copy();
+		
+	5.QString 
+      1).QString str = "User:";
+		 str += userName + "\n";
+	  2).str.append(userName);
+	     str.append("\n");
+	  3).str.sprintf("%s %.1f%%",userName,100);
+	  4).str = QString(%1 %2).arg(userName).arg(100);	
+	  5).将数字转为字符串:
+	     str = QString::number(59.6) 
+	     str.setNum(59.6);
+		 将字符串转为数字:
+		 toInt(),toLongLong(),toDouble()
+	  6).mid(startpos,length),left(),right()
+	     eg:
+		 QString str = "polluter pays principle";
+		 cerr << str.mid(9,4).ascii() << endl;
+		 
+	  7).startsWith(),endsWith()
+	  8).==
+	  9).replace()
+	     QString str = "a sunny day";
+		 str.replace(2,5,"cloudy"); ==>"a cloudy day"
+		 <==> str.remove(2,5);str.insert(2,"cloudy");
+	  10).去掉字符串首尾空格:str.stripWhiteSpace()
+	      去掉字符串首尾空格之外，用一个空格替换字符串中一个或多个空格:str.simplifyWhiteSpace()
+	  11).字符串使用split()分割成字符串列表
+	     QString str = "polluter pays principle";
+		 QStringList words = QStringList::split(" ",str);
+		 QStringList::join():将QStringList中的元素通过join()连接成一个单一的字符串
+		 
+	  12). 判空:isEmpty()、length() == 0
+	  13).const char *转换QString
+	      str += " (1820)";
+		  QString 转换 const char *
+		  str.ascii()、str.latin1()
+	  14).eg:
+	      QMap<QString,QVariant> config;
+		  config["Width"] = 890;
+		  config["Height"] = 640;
+		  config["ForegroundColor"] = black;
+		  QStringList files;
+		  files << "2017-7-27.dat" << "2017-7-30.dat" << "2017-7-31.dat";
+		  config["RecentFiles"] = files; //若映射的值为容器，遍历时需特别处理
+		  QMap<QString,QVariant>::const_iterator it = config.begin();
+		  while (it != config.end()){
+			 QString str;
+			 if (it.data().type() == QVariant::StringList)
+			    str = it.data().toStringList().join(", ");
+			 else 
+			    str = it.data().toString();
+			cerr << it.key().ascii() << ": " << str.ascii() << endl;
+			++it;
+		  }
+		  
+七、数据库
+   1.连接和查询
+    eg:
+     bool createConnection()
+	 {
+		QSqlDatabase *db = QSqlDatabase::addDatabase("QOCI8"); //Qracle数据库驱动
+		db->setHostName("mozart.edu");
+		db->setDatabaseName("musicdb");
+		db->setuserName("gbatstone");
+		db->setPassword("xzm");
+		if (!db->open()){
+		   db->lastError().showMessage();
+		   return false;
+		}
+		return true;
+	 }
+	 int main(int argc,char *argv[])
+	 {
+		QApplication app(argc,argv);
+		if (!createConnection())
+		return -1;
+		...
+		return app.exec();
+	 }
+    另一种创建方式:
+    bool createOneConnection(const QString &name)
+	{
+		QSqlDatabase *db;
+		if (name.isEmpty())
+		   db = QSqlDatabase::addDatabase("QSQLITEX");
+		else 
+		   db = QSqlDatabase::addDatabase("QSQLITEX",name);
+		db->setDatabaseName("cdcollection.dat");
+		if (!db->open()){
+			db->lastError().showMessage();
+			return false;
+		}
+		return true;
+	}	
+	bool createConnections()
+	{
+		return createOneConnection("") //当不指定数据库名称时会被默认使用
+				&& createOneConnection("ARTIST");
+				&& createOneConnection("CD");
+	}
+	 
+	 
+	 连接建立后，就可以使用QSqlQuery执行底层数据库支持的Sql语句了.
+	 eg:
+	   QSqlQuery query; //其他遍历方式:first(),last(),prev(),seek(),at()比较慢或耗内存,可在调用exec()前调用setForwardOnly(true)并只使用next();
+	   query.exec("SELECT title,year FROM cd WHERE year >= 1998");
+	   //遍历查询结果集
+	   while(query.next()){ //执行查询后需调用一次next()定位到结果集中的第一个记录
+		QString title = query.value(0).toString(); //value()函数把字段值作为QVariant返回，字段按SELECT语句给定顺序从0开始
+		int year = query.value(1).toInt();
+		cerr << title.ascii() << ":" << year << endl;
+	   }
+	or:
+	  QSqlQuery query("SELECT title,year FROM cd WHERE year >= 1998");
+	  if (!query.isActive())
+	     query.lastError().showMessage();
+		 
+   2.插入
+	执行INSERT,和查询一样，但QSqlQuery::numRowsAffected()返回被SQL语句影响的行的数量，若失败返回-1.
+	若需要插入多个记录或想避免把值转换成为字符串，可以使用prepare()指定一个包含占位符的查询，然后绑定插入数据
+	Qt支持Qracle和ODBC风格的占位符语法
+	QSqlQuery query(db); //Oracle
+	query.prepare("INSERT INTO cd(id,artistid,title,year) VALUES(:id,:artistid,:title,:year)");
+	query.bindValue(":id",203);
+	query.bindValue(":artistid",102);
+	query.bindValue(":title",QString("Living in America"));
+	query.bindValue(":year",2012);
+	query.exec();  
+	QSqlQuery query(db); //ODBC
+	query.prepare("INSERT INTO cd(id,artistid,title,year) VALUES(?,?,?,?)");
+	query.addBindValue(203);
+	query.addBindValue(102);
+	query.addBindValue(QString("Living in America"));
+	query.addBindValue(2012);
+	query.exec();
+
+   3.事务处理
+     eg:
+	 QSqlDatabase::database()->transaction();//开始一个事务,QSqlDatabase::database()返回一个createConnection()中创建的QSqlDatabase对象的指针
+	 QSqlQuery query;
+	 query.exec("SELECT id FROM artist WHERE name = 'Gluecifer'");
+	 if (query.next()){
+		int artistId = query.value(0).toInt();
+		query.exec("Insert...	);
+	 }
+	 //QSqlDatabase::database()->rollback(); //回滚事务
+	 QSqlDatabase::database()->commit();  //提交事务
+	 //查看数据库是否支持事务处理，不支持则上面的事务调用不做任何操作
+	 QSqlDriver *driver = QSqlDatabase::database()->driver();
+	 if (driver->hasFeature(QSqlDriver::Transactions)) //测试是否支持事务操作
+		...
+   4.创建多个连接
+     指定addDatabase()的第2个参数，作为连接的别名
+	 eg:
+	   QSqlDatabase *db = QSqlDatabase::addDatabase("QPSQL7","OTHER); //PostgreSQL
+	   ...
+	   QSqlDatabase *db = QSqlDatabase::database("OTHER");
+	   //使用OTHER连接执行查询
+	   QSqlQuery query(db);
+	   query.exec("...")
+	   
+   5.QSqlCursor(继承QSqlQuery的高层类，扩展了一些方便的函数)
+     1).使用QSqlCursor执行SELECT
+	    QSqlCursor cursor("cd");
+	    cursor.select("year >= 1998"); <==> QSqlQuery query("SELECT id,artistid,title,year FROM cd WHERE year >= 1998");
+	    while (cursor.next()){
+	      QString title = cursor.value("title").toString(); //传递的是"title"而非字段序号
+	    }
+	 2).使用QSqlCursor执行INSERT
+	    QSqlCursor cursor("cd");
+	    QSqlRecord *buffer = cursor.primeInsert();
+	    buffer->setValue("id",113);
+	    buffer->serValue("artistid",225);
+	    buffer->setValue("title","Shanghai My Heart");
+	    cursor.insert();
+	 3).使用QSqlCursor执行UPDATE
+	    QSqlCursor cursor("cd");
+		cursor.select("id=212");
+		if (cursor.next()){
+			QSqlRecord *buffer = cursor.primeUpdate();
+			buffer->setValue("title","Melody A.M.");
+			buffer->setValue("year",buffer->value("year").toInt() +1 );
+			cursor->udpate();
+		}
+	 4).使用QSqlCursor执行DELETE
+	    QSqlCursor cursor("cd");
+		cursor.select("id=128"0;
+		if (cursor.next()){
+			cursor.primeDelete();
+			cursor.del();
+		}
+		//删除前对编号大于删除的编号进行重新编号
+		void beforeDeleteTable(QSqlRecord *buffer)
+		{
+		   QSqlQuery query(db); 
+		   query.exec("UPDATE track SET number = number - 1 WHERE track.number >"+buffer->value("number").toString());
+		}
+		
+	5).子类化QSqlCursor并重新实现calculateField()函数来把字段值转换为我们需要的格式
+	   eg:
+	   QVariant QSqlCursor::calculateField(const QString &name)
+	   {
+		 if (name == "duration"){
+			int duration = value("duration").toInt();
+			return QString("%1:%2").arg(duration/60,2).arg(duration%60,2);
+		 }
+		 return QVariant();
+	   }
+	   还需要在游标上调用setCalculated("duration",true);告诉QDataTable在duration字段上使用
+	   由calculateField()返回的值
+	   
+八、网络
+    QFtp、QHttp继承QSocket,QSocket提供TCP套接字。QSocketDevice类同时支持TCP和UDP.
+	1.QFtp(异步工作)
+	  实现了FTP协议的客户端程序，提供常用FTP操作,get()、put()、remove()、mkdir()、rawCommand()、readBlock()、readAll()
+	  eg:
+	  QFtp ftp; QFile file;
+	  connect(&ftp,SIGNAL(done(bool)),this,SLOT(ftpDone(bool))); //ftp完成所有的请求处理发射done(bool)信号
+	  void getPriceList()
+	  {
+	    file.setName("price-list.csn");
+	    if (!file.open(IO_WriteOnly)){ //打开用于写入的QFile
+		  return ;
+	    }
+		//使用QFtp对象执行一定顺序的FTP指令,这些指令在Qt的事件循环中排队并被执行，若全部执行完毕发射done(bool)信号
+		connectid = ftp.connectToHost("ftp.trolltech.com");
+		loginid = ftp.login();
+		cdid = ftp.cd("/topsecret/csv");
+		getid = ftp.get("price-list.csv",&file);
+		closeid = ftp.close();
+	  }
+	  void ftpDone(bool error)
+	  {
+		if (error)
+		  //... show msg 
+		file.close();
+	  }
+	  
+	  QFtp开始执行一个指令的时候,它发射commandStarted(int)信号，指令完成时,发射commandFinished(int,bool)信号 //int标识一个指令的ID号
+	  void commandStarted(int id)
+	  {
+		if (id == connectid)
+		  statusBar()->message(tr("Connecting..."));
+		else if (id == loginid)
+		  statusBar()->message(tr("Loggin in ..."));
+	  }
+	  //下载一个FTP目录下的所有文件(c++ gui qt3 编程P290)
+	  
+	2.QHttp(异步工作)
+	  提供操作为:setHost()、get()、post()、head()、readBlock()、readAll()
+	  eg:
+	  connect(&http,SIGNAL(done(bool)),this,SLOT(httpDone(bool)));
+	  void getFile()
+	  {
+		file.setName("aboutqt.html");
+		if (!file.open(IO_WriteOnly)){
+			return ;
+		}
+		//使用QHttp对象执行一定顺序的HTTP指令,这些指令在Qt的事件循环中排队并被执行，若全部执行完毕发射done(bool)信号
+		http.setHost("doc.trolltech.com");
+		http.get("/3.2/aboutqt.html",&file); 
+		http.closeConnection();
+	  }
+	  void httpDone(bool error)
+	  {
+		if (error)
+		  //...
+		 file.close();
+	  }
+	  
+	  使用post()向一个CGI脚本发送一个name = value对的列表
+	  http.setHost("www.example.com");
+	  http.post("/cgi/somescript.py",QCString("x=200&y=320"),&file);
+	
+	  获得更多控制可使用request()函数，可接收一个任意的HTTP头和数据
+	  QHttpRequestHeader header("POST","/search.html");
+	  header.setValue("Host","www.trolltech.com");
+	  header.setContentType("application/x-www-from-urlencoded");
+	  http.setHost("www.trolltech.com");
+	  http.request(header,QCString("qt-interest=on&search=opengl"));
+	
+	3.使用QSocket的TCP网络 (QSocket继承了QIODevice，所以它可以通过使用QDataStream或QTextStream来进行读取和写入)
+	  TCP是一个基于流的协议，对于应用程序数据表现为一个长长的流。基于TCP的高层协议通常是基于行的或者基于块的
+	  基于行的协议把数据作为一行文本进行传输，每行都以一个换行符结尾.
+	  基于块的协议报数据作为二进制块进行传输,每一块是由一个size大小字段和紧跟它的一个size字节的数据组成.
+	  eg:客户端
+	  QSocket socket;
+	  socket.connectToHost("tripserver.zugbahn.de",6178); //异步调用,连接通常会在稍后被建立，建立成功后发射connected()信号,
+	  //连接失败发射error(int)信号
+	  blockSize = 0; //存储从服务器接收的下一个块的长度，0表示还不知道下一个块的大小
+	  //当QSocket对象发射connected()信号时表明一个连接已经被建立,sendRequest槽会被执行
+	  void sendRequest()
+	  {
+	    //生成一个到服务器的请求
+		QByteArray block;
+		QDataStream out(block,IO_WriteOnly);
+		out.setVersion(5);
+		out << (Q_UINT16)0 << (Q_UINT8)'S' << fromCombox->currentText()
+			<< toCombox->currentText() << dateEdit->date() << timeEdit->time()
+		if (departureRadioButton->isOn())
+			out << (Q_UINT8)'D';
+		else 
+			out << (Q_UINT8)'A';
+		out.device()->at(0); //移动到字节数组的开始处
+		out << (Q_UINT16)(block.size() - sizeof(Q_UINT16)); //去掉块大小字段所占用的空间
+		socket.writeBlock(block.data(),block.size()); //向服务器发送这个块
+	  }
+	  //updateListView()槽被连接到QSocket的readyRead()信号，只要QSocket已经从服务器收到新数据该信号就会被发射
+	  void updateListView()
+	  {
+		connectionTimer.start(30*1000,true); //重新开始单触发连接定时器再运行30s
+		QDataStream in(&socket);
+		in.setVersion(5);
+		for(;;){
+			if (blockSize == 0 ){ //还没有读取到下一个块的大小
+			  if (socket.bytesAvailable() < sizeof(Q_UINT16))
+			    break;
+			  in >> blockSize;
+			}
+			if (blockSize == 0xFFFF){ //没有更多的数据可以接收
+			  closeConnection();
+			  break;
+			}
+			if (socket.bytesAvailable() < blockSize) //若没有块大小这么多字节可以读取，则停止
+			  break;
+			//一个完整的块已经到达
+			QDate date;
+			QTime departureTime;
+			QTime arrivalTime;
+			Q_UINT16 duration;
+			Q_UINT8  change;
+			QString  trainType;
+			
+			in >> date >> departureTime >>duration >> change >> trainType;
+			new QListViewItem(listView,date.toString(LocalDate),
+							  departureTime.toString(tr("hh:mm")),
+							  arrivalTime.toString(tr("hh:mm")),
+							  tr("%1 hr %2 min").arg(duration/60).arg(duration%60),
+							  QString::number(change),trainType);
+			blockSize = 0; //重置blockSize变量为0来表示下一个块的大小是未知的并需要去读取
+		}
+	  }
+	  void closeConnection
+	  {
+		socket.close(); //关闭了到TCP服务的连接
+	  }
+	  eg:服务端
+	  包含2个类TripServer和ClientSocket.TripServer继承了QServerSocket允许我们接收来访TCP连接类.
+	  ClientSocket重新实现QSocket并处理一个单独的连接,任何时候内存中ClientSocket对象的数量和正在
+	  服务的客户端数量是一样的。
+	  class TripServer:public QServerSocket
+	  {
+		public:
+		TripServer(QObject *parent=0,const char *name = 0);
+		void newConnection(int socket);
+	  }
+	  TripServer::TripServer(QObject *parent,const char *name):QServerSocket(6178,1,parent,name)
+	  {/*6178传递的端口号,1表示我们想允许等待的连接数量*/}
+	  void TripServer::newConnection(int socketId)
+	  { //只要有一个客户端试图连接到服务器监听的端口此函数就会被调用
+		ClientSocket *socket = new ClientSocket(this);
+		socket->setSocket(socketId);
+	  }
+	  ClientSocket类继承了QSocket并封装了一个单独客户端的状态
+	  class ClientSocket:public QSocket
+	  {
+		Q_OBJECT
+		public:
+		  ClientSocket(QObject *parent = 0,const char *name = 0);
+		private slots:
+		  void readClient(); //connect(this,SIGNAL(readyRead()),this,SLOT(readClient()));
+		private:
+		  Q_UINT16 blockSize;
+	  }
+	  void this::readClient() //槽被连接到QSocket的readyRead信号
+	  {
+		QDataStream in(this);
+		in.setVersion(5);
+		if (blockSize == 0){
+		   if (bytesAvailable() < sizeof(Q_UINT16))
+		      return ;
+		   in >> blockSize;
+		}
+		if (bytesAvailable() < blockSize)
+		    return ;
+		Q_UINT8 requestType;
+		QString from;
+		QString to;
+		QDate   date;
+		QTime 	time;
+		Q_UINT8 flag;
+		
+		in >> requestType;
+		if (requestType == 'S'){
+			in >> from >> to >> date >> time >> flag;
+			//根据客户端传过来的数据，生成服务端要下发的数据
+			QByteArray block;
+		    QDataStream out(block,IO_WriteOnly);
+		    out.setVersion(5);
+		    Q_UINT16 duration = rand() %200;
+			out << (Q_UINT16)0 << date << time << duration << (Q_UINT8)1 << QString("InterCity")；	   
+			out.device()->at(0); //移动到字节数组的开始处
+			out << (Q_UINT16)(block.size() - sizeof(Q_UINT16)); //去掉块大小字段所占用的空间
+			socket.writeBlock(block.data(),block.size()); //向服务器发送这个块
+			//发送0xFFFF表示这个数据的结束
+			QDataStream out(this);
+			out << (Q_UINT16)0xFFFF;
+		}
+		close();
+		if (state() == Idle)
+		  deleteLater();
+	  }
+	4.使用QSocketDevice的UDP网络
+	  若想使用UDP，必须直接使用QSocketDevice。UDP是不可信赖的，基于包的协议，无连接，比TCP小巧，丢失不报错
+	  peerAddress()和peerPort()可以被服务器用来决定要回复的地址和端口
+	  eg:服务端
+	  class WeatherBalloon:public QPushButton
+	  {
+		Q_OBJECT
+		public:
+		  WeatherBalloon(QWidget *parent=0,const char *name=0)
+		  double temperature() const;
+		  double humidity() const;
+		  double altitude() const;
+		protected:
+		  void timerEvent(QTimerEvent *event);
+		private:
+		  QSocketDevice socketDevice;
+		  int myTimerId;
+	  }
+	  WeatherBalloon::WeatherBalloon(QWidget *parent,const char *name)
+	  :QPushButton(tr("Quit"),parent,name),socketDevice(QSocketDevice::Datagram)
+	  {
+		 socketDevice.setBlocking(false); //设置为异步，默认是同步的
+		 myTimerId = startTimer(5 * 1000); //每5s发送包含当前天气情况的UDP数据包
+	  }
+	  void WeatherBalloon::timerEvent(QTimerEvent *event)
+	  {
+		if (event->timerId() == myTimerId){
+			QByteArray datagram;
+			QDataStream out(datagram,IO_WriteOnly);
+			out.setVersion(5);
+			out << QDateTime::currentDateTime() << temperature() << humidity() << altitude();
+			socketDevice.writeBlock(datagram,database.size(),0x7F000001,5824); //IP地址和对方的端口号，只能使用主机地址
+			//主机名解析成它的IP地址需要使用到QDns类
+		} else {
+			QPushButton::timerEvent(event);
+		}
+	  }
+	  int main(int argc,char *argv[])
+	  {
+		QApplication app(argc,argv);
+		WeatherBalloon balloon;
+		balloon.setCaption(QObject::tr("Weather Balloon");
+		app.setMainWidget(&balloon);
+		QObject::connect(&balloon,SIGNAL(clicked()),&app,SLOT(quit()));
+		balloon.show();
+		return app.exec();
+	  }
+	  eg:客户端
+	  class WeatherStation:public QDialog
+	  {
+		Q_OBJECT
+		public:
+		   WeatherStation(QWidget *parent = 0,const char *name=0);
+		private slots:
+		   void dataReceived();
+		private:
+		   QSocketDevice socketDevice; //读取数据包
+		   QSocketNotifier *socketNotifier; //让应用程序感知到来的数据包
+		   ...
+	  };
+	  WeatherStation::WeatherStation(QWidget *parent,const char *name)
+		:QDialog(parent,name),socketDevice(QSocketDevice::Datagram)
+	 {
+		socketDevice.setBlocking(false);
+		socketDevice.bind(QHostAddress(),5824); //QHostAddress():可接收来自任何IP地址的数据包,5824为套接字分配的一个端口号
+		socketNotifier = new QSocketNotifier(socketDevice.socket(),QSocketNotifier::Read,this); //创建一个QSocketNotifier对象来监视这个套接字
+		connect(socketNotifier,SIGNAL(activated(int)),this,SLOT(dataReceived())); //套接字接收一个数据包，QSocketNotifier就会发射一个activated信号
+	 }
+	 void WeatherStation::dataReceived()
+	 {
+	   QByteArray datagram(socketDevice.bytesAvailable());
+	   socketDevice.readBlock(datagram.data(),datagram.size());
+	   QDataStream in(datagram,IO_ReadOnly);
+	   in.serVersion(5);
+	   in >> dateTime >> temperature >> humidity >> altitude;
+	   ...
+	 }
+	 int main(int argc,char *argv[])
+	 {
+	   QApplication app(argc,argv);
+	   WeatherStation station;
+	   app.setMainWidget(&station);
+	   station.show();
+	   return app.exec();
+	 }
+	 
+九、国际化
+	1.自己设计的文件格式支持读取和写入任意Unicode字符，在向QTextStream写入之前调用
+	  setEncoding(QTextStream::Unicode)将数据保存为Unicode。读取文本时调用setEncoding(QTextCodec::Unicode)。
+	
+	2.禁止从const char * 到QString的隐含转换
+	  在包含<qstring.h>之前定义QT_NO_CAST_ASCII 或 在.pro中 DEFINES += QT_NO_CAST_ASCII
+	  
+十、平台特性	
+	1.在X11、Mac OS X 上对一个QWidget,handle()、winId()的意义相同，在windows上handle()返回设备上下文，winId()
+  	  返回窗口句柄。在X11上,QPaintDevice()提供了返回很多不同的指针或句柄的函数，x11Display(),x11Screen()
+	2.在底层事件(x11->XEvent,windows/Mac OS X->MSG,Qt/Embedded->QWSEvent)被转换为QEvent之前访问它们，可子类化
+	  QApplication并重新实现相关平台特定事件过滤器(winEventFilter()、x11EventFilter()、macEventFilter()、
+	  qwsEventFilter())。通过重新实现winEvent(),x11Event(),macEvent(),qwsEvent()就可以访问这些被发送给一个给定
+	  的QWidget的平台特定事件了。
+	
+十一、多线程
+    1.子类化QThread并重新实现它的run函数。
+	 eg:
+	 class Thread:public QThread
+	 {
+		public:
+		   Thread();
+		   void setMessage(const QString &message);
+		   void run(); //重新实现run函数
+		   void stop();
+		private:
+		   QString messageStr;
+		   volatile bool stopped; //volatile不同的线程都需要访问它，可禁止编译器对此变量的访问的优化
+	 };
+	 Thread::Thread()
+	 {
+		stopped = false;
+	 }
+	 void Thread::run()
+	 {
+		while (!stopped)
+		   cerr << messageStr.ascii();
+		stopped = false;
+		cerr << endl;
+	 }
+	 void Thread::stop()
+	 {
+		stopped = true;
+	 }
+	 void UserThread::startorstopsthread()
+	 {
+		if (thread.running()){
+		  thread.stop();
+		  //..
+		 } else {
+			thread.start();
+			//...
+		 }
+	 }
+	 void UserThread::closeEvent(QCloseEvent *event)
+	 {
+		threadA.stop(); //停止正在运行的线程
+		threadB.stop();
+		threadA.wait(); //等待它们完成
+		threadB.wait();
+		event->accept(); //应用程序干净地退出
+	 }
+	 Note: .pro文件添加: CONFIG += thread
+	
+	2.多个线程间的同步
+	  QMutex,QMutexLocker,QSemphore,QWaitCondition
+	  1).QMutex 保护一个变量或者一段代码
+         lock()函数锁住互斥量,其他线程被阻塞,直到此线程对互斥量解锁unlock().
+		 tryLock()若互斥量已经被锁住，它立即返回.
+	    eg:
+		QMutex mutex;
+		void Thread::run()
+		{
+			for (;;){
+				mutex.lock();
+				if (stopped){
+					stopped = false;
+					mutex.unlock();
+					break;
+				}
+				mutex.unlock();
+				cerr << messageStr.ascii();
+			}
+			cerr << endl;
+		}	
+		void Thread::stop()
+		{
+			mutex.lock();
+			stopped = true;
+			mutex.unlock();
+		}
+		Note:在复杂函数中锁住和解锁互斥量，特别是c++的异常函数中，可能会发生错误.
+		Qt提供了QMutexLocker简化互斥量的处理，构造函数接收一个QMutex并锁住它,析构函数
+		解锁这个互斥量
+		void Thread::stop()
+		{
+			QMutexLocker locker(&mutex);
+			stopped = true;
+		}
+	  2).QSemphore:互斥量的泛化版本，处理一定数量的同样资源
+	     信号为系统特定的线程调度器提供了很大程度上的自由,可以研究这些线程的行为并选择一个优化的调度策略。
+	     QSemphore semaphore(1); <==> QMutex mnutex;
+		 semaphore++; 			 <==> mutex.lock();
+		 semaphore--;            <==> mutex.unlock();
+		 典型应用场景:在两个线程之间传递一定数量(DataSize)的数据，而这两个线程使用一定大小(BufferSize)的共享循环缓存
+	     eg:生产者和消费者实例
+		 同步需求:生产者过快生产数据，会覆盖消费者还没有读取的数据。消费者过快读取数据，将会越过生产者并读取一些垃圾数据。
+		 使用2个信号量还实现同步要求:它们互补都为BufferSize大小
+		 QSemphore freeSpace(BufferSize); //控制生产者可以填充数据的缓存部分
+		 QSemphore usedSpace(BufferSize); //控制消费者可以读取的区域
+		 
+		 DataSize = 100000; BufferSize = 4096;
+		 void acquire(QSemphore &semaphore){semaphore++;}
+		 void release(QSemphore &semaphore){semaphore--;}
+		 void Poducer:run()
+		 {
+			for (int i = 0; i < DataSize; ++i){
+				acquire(freeSpace); //缓存已满，消费者没来得及读取，则阻塞到消费者开始消耗数据为止
+				buffer[i % BufferSize] = "ACGT"[(uint)rand() % 4]; //填充该空闲字节
+				release(usedSpace); //该字节释放为"使用的"
+			}
+		 }
+		 void Consumer::run()
+		 {
+			for (int i = 0;i < DataSize;++i)
+			{
+				acquire(usedSpace); //缓存为空，则阻塞到生产者已经产生一些数据
+				cerr << buffer[i % BufferSize];
+				release(freeSpace); //释放该字节为"空闲的"
+			}
+			cerr << endl;
+		 }
+		 int main()
+		 {
+			usedSpace += BufferSize;
+			Producer producer;
+			Consumer consumer;
+			producer.start();
+			consumer.start();
+			producer.wait();
+			consumer.wait();
+			return 0;
+		 }
+		 OR:另一个解决方案QWaitCondition和QMutex
+	  3).QWaitCondition
+	    允许一个线程在一定条件下唤醒其他线程.
+		eg: 
+		QWaitCondition bufferIsNotFull;
+		QWaitCondition bufferIsNotEmpty;
+		QMutex mutex;
+		int usedSpace = 0;
+		void Producer::run()
+		{
+		  for (int i = 0;i < DataSize; ++i){
+			mutex.lock();
+			while( usedSpace == BufferSize) //检查缓存是否充满
+			     bufferIsNotFull.wait(&mutex);  //若是充满的，等待"缓存不是充满的"条件
+			buffer[i % BufferSize] = "ACGT"[(uint)rand() % 4]; //满足缓存不是充满的条件,向缓存写一个字节
+			++usedSpace;
+			bufferIsNotEmpty.wakeAll(); //唤醒所有等待"缓存不是空的"条件变为真的线程
+			mutex.unlock();
+		  }
+		}
+		Note:QWaitCondition::wait()可把一个被锁住的互斥量作为它的参数，在锁定当前线程之前它会被解锁，然后在返回之前锁定
+		eg:
+		  while (usedSpace == BufferSize)
+			bufferIsNotFull.wait(&mutex);
+		  <==>
+		  if (usedSpace == BufferSize){ //一旦允许多于1个的生产者线程,if语句将不在成立
+			mutex.unlock();
+			bufferIsNotFull.wait();
+			mutex.lock();
+		  }
+		void Consumer::run()
+		{
+		  for(int i = 0;i < DataSize; ++i){
+			mutex.lock();
+			while(usedSpace == 0)
+			  bufferIsNotEmpty.wait(&mutex); //等待"缓存不是空的"条件
+			cerr << buffer[i % BufferSize];
+			--usedSpace;
+			bufferIsNotFull.wakeAll(); //唤醒所有等待"缓存不是满的"条件的线程
+			mutex.unlock();
+		  }
+		  cerr << endl;
+		}
+		
+	  4).QThreadStorge<T>常用于高速缓存，通过在不同线程中拥有一个独立的高速缓存，可以避免锁住，解锁和可能等待一个互斥量的花费
+	     eg:
+		 QThreadStorge<QMap<int,double> *> cache; //cache在每一个线程中保存指向一个QMap<int,double>的指针
+		 
+		 void insertIntoCache(int id,double value)
+		 {
+			if (!cache.hasLocalData()) //在一个特定的线程中使用高速缓存时hasLocalData()返回false
+			   cache->setLocalData(new QMap<int,double>);
+			cache.localData()->insert(id,value);
+		 }
+	    
+		 void removeFromCache(int id)
+		 {
+			if (cache.hasLocalData())
+			   cache.localData()->remove(id);
+		 }
+	3.和图像用户界面线程通信(主线程)
+	  主线程可创建QThread子类的对象开始一些新的线程，新线程之间的通信可以使用具有互斥量，信号或等待条件的共享变量。
+	  但它们不能和主线程通讯，因为它们会锁住事件循环并冻结用户界面,解决方案是使用自定义事件。
+	  QApplication::postEvent()线程安全函数可在任何一个线程中用它把事件投递给主线程。
+	  eg:
+	   .h
+	   enum {TransactionStart =1001,AllTransactionDone = 1002};
+	   .cpp
+	   ImageWindow::ImageWindow(QWidget *parent,const char *name)
+	    :QMainWindow(parent,name)
+	   {
+	     thread.setTargetWidget(this); //设置工作线程的目标窗口为ImageWindow，thread线程会把事件投递给该目标窗口
+	   } 
+	   void ImageWindow::addTransaction(Transaction *transact)
+	   {
+		 thread.addTransaction(transact); //向工作线程的事务队列中添加一个事务
+		 //...
+	   }
+	   void ImageWindow::customEvent(QCustomEvent *event) //从QObject中重新实现，用来处理自定义事件
+	   {
+		 if ((int)event->type() == TransactionStart){
+			TransactionStartEvent *startEvent = (TransactionStartEvent*)event;
+			infoLabel->setText(startEvent->message);
+		 } else if (int)event->type() == AllTransactionDone){
+			//...
+		 } else {
+			QMainWindow::customEvent(event);
+		 }
+	   }
+	   class TransactionStartEvent:public QCustomEvent
+	   {
+	    public:
+		  TransactionStartEvent();
+		  
+		  QString message;
+	   };
+	   TransactionStartEvent::TransactionStartEvent()
+		:QCustomEvent(TransactionStart)
+	   { }
+	   TransactionThread thread;
+	   
+	   TransactionThread :public QThread
+	   {
+		 public:
+		  void run();
+		  void setTargetWidget(QWidget *widget);
+		  void addTransaction(Transaction *transact);
+		  void setImage(const QImage &image);
+		  QImage image();
+		 private:
+		   QWidget *targteWidget;
+		   QMutex  mutex;
+		   QImage  currentImage;
+		   std::list<Transaction *> transactions; //维护一个事务列表，在后台一个接一个地处理并执行它们
+	   };
+	   void TransactionThread::addTransaction(Transaction *transact) //添加一个到事务到队列中
+	   {
+	     QMutexLocker locker(&mutex);
+		 transactions.push_back(transact);
+		 if (!running())
+		    start();
+	   }
+	   void TransactionThread::run()
+	   {
+	      Transaction *transact;
+		  for (;;){
+		    mutex.lock();
+			if (transactions.empty()){
+			   mutex.unlock();
+			   break;
+			}
+			QImage oldImage = currentImage;
+			transact = *transactions.begin();
+			transactions.pop_front();
+			mutex.unlock();
+			
+			TransactionStartEvent *event = new TransactionStartEvent;
+			event->message = transact->messageStr();
+			QApplication::postEvent(targteWidget,event); //向目标窗口投递事件
+			
+			QImage newImage = transact->apply(oldImage);
+			delete transact;
+			
+			mutex.lock();
+			currentImage = newImage;
+			mutex.unlock();
+		  }
+		  QApplication::postEvent(targteWidget,new QCustomEvent(AllTransactionDone)); //事件被处理完毕，投递AllTransactionDone事件
+	   }
+	   Note:所有对transactions和currentImage成员变量的访问都受到一个互斥量的保护.
+	   class Transaction //用户可对图片执行操作的抽象基类
+	   {
+	     public:
+		   virtual QImage apply(const QImage &image) = 0;
+		   virtual QString messageStr() = 0;
+	   };
+	   它的三个具体子类:FlipTransaction,ResizeTransaction,ConvertDepthTransaction
+	   class FlipTransaction:public Transaction
+	   {
+		public:
+		   FlipTransaction(Qt::Orientation orient);
+		   QImage apply(const QImage &image);
+		   QString messageStr();
+		private:
+		   Qt::Orientation orientation;
+	   };
+	   QImage FlipTransaction::apply(const QImage &image)
+	   {
+		  return image.mirror(orientation == Qt::Horizontal,orientation == Qt::Vertical);
+	   }
+	   QString FlipTransaction::messageStr()
+	   {
+	      if (orientation == Qt::Horizontal)
+		     return QObject::tr("Flipping image horizontally...");
+		  else
+		     return QObject::tr("Flipping image vertically...");
+	   }
+	
+	
+	
+	
+	
+	
+	 
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+、其他
+1.鼠标按下: LeftButton(左键)、RightButton(右键)
+ 

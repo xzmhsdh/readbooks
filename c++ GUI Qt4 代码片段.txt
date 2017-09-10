@@ -1,0 +1,431 @@
+一、QT4知识点
+ 1.QWidget的windowModified属性，该窗口的文档存在没有保存的变化，应将它设置为true，否则设置为false.
+ 2.仿函数(类):使一个类的使用看上去像一个函数，其实现就是类中实现一个operator()，类有类型函数的行为.
+   复用代码时，可写公共函数，但函数用到的变量就可能成为公共的全局变量，较好维护的方式就是使用仿函数.
+   eg:
+   class compare_class
+   {
+     public:
+	   bool operator()(int A,int B) const {return A < B;}
+   };
+   template<class ComparisonFunctor>
+     void sort_ints(int *begin_items,int num_items,ComparisonFunctor c);
+   int main()
+   {
+	 int items[] = {4,3,1,2};
+	 compare_class functor;
+	 sort_ints(items,sizeof(items)/sizeof(items[0]),functor);
+   }
+  3.算法
+    <QtAlgorithms> <==> <algorithm>
+	1.qFind():线性搜索
+	 eg:
+	 QStringList list;
+	 list << "Emma" << "Karl" << "James" << "Mariette";
+	 QStringList::iterator i = qFind(list.begin(),list.end(),"Karl");
+	 QStringList::iterator j = qFind(list.begin(),list.end(),"Petra");
+	2.qBinaryFind():在项已经是升序的顺序存储的基础上执行快速的二分搜索
+    3.qFill():用特定的值组装一个容器
+	  QLinkedList<int> list(10);
+	  qFill(list.begin(),list.end(),1009);
+	4.qCopy()将一个容器类的值复制到另一个容器类
+	  QVector<int> vect(list.count());
+	  qCopy(list.begin,list.end(),vect.begin());
+	5.qSort()以升序排列容器中的项
+	  qSort(list.begin(),list.end());
+	  qSort(list.begin(),list.end(),qGreater<int>()); //qGreater<T>
+	  
+	6.qStableSort():
+	7.qDeleteAll():对每一个存储在容器类中的指针调用delete;
+	  eg:
+	  qDeleteAll(list); //项仍作为悬挂指针存在于容器类上
+	  list.clear();     //需调用clear()置空
+	8.qSwap()可交换两个变量的值
+	  int x1,x2;
+	  qSwap(x1,x2);
+	  <QtGlobal>:提供了一些有用的定义,qAbs(),qMin(),qMax()
+ 4.自定义外观
+   4.1.子类化窗口控件,并重新实现它的绘制和鼠标事件处理器
+   4.2.子类化QStyle或者一个预定义的风格,如QWindowStyle
+      1).
+    
+   4.3.从Qt4.2开始，可以使用Qt样式表,类似CSS
+    1). eg: 在单独一个类上设置一个属性
+	  QApplication::setStyleSheet()为整个应用程序设置一个样式表:
+	  qApp->setStyleSheet("QLineEdit{background-color:yellow;}"); 
+      或
+	  QWidget->setStyleSheet("QLineEdit{background-color:yellow;}");
+      或
+	  lineEdit->setStyleSheet("background-color:yellow");
+	 2).组合的样式规则
+	  eg:
+	  QCheckBox,QComboBox,QLineEdit,QListView,QRadioButton,QSpinbox{
+		color:#050505;
+		background-color:yellow;
+	  }
+	  QLineEdit {
+		color:rgb(0,88,152);
+		background-color:rgba(97%,80%,9%,50%);
+	  }
+	  eg:指定调色板实体或一个渐变,渐变的类型有:qlineargradient(),qradialgradient(),qconicalgradient()
+	  QLineEdit{
+		color:palette(Base);
+		background-color:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 white,stop:0.4 gray,stop:1 green);
+	  }
+	  使用background-image属性指定一个图片作为背景。从窗口的左上角(不包含margin指定的边缘区域)开始,重复填充整个窗口.
+      QLineEidt{
+		color:rgb(0,88,152); //若也指定了背景图片，则背景颜色将会在图片的半透明区域中透射出来.
+		background-image:url(:/images/yellow-bg.png);
+		background-position:top right; //填充的开始点
+		background-repeat:repeat-y; //在y方向重复填充
+	  }	  
+	  给OK和Cancel按钮指定前景色
+	  QPushButton[text="OK"]{
+		color:green;
+	  }
+	  QPushButton[text="Cancel"]{
+		color:red;
+	  }
+	  =========================================
+	  选择器    |  实例  | 可匹配的窗口部件
+	  =========================================
+	  全局对象     *       任意窗口部件
+	  类型         QDial   给定类的实例，包括子类
+	  类 		  .QDial   给定类的实例，不包括子类
+	  标识   QDial#ageDial 给定对象名称的窗口部件
+	  Qt属性 QDial[y="0"]  为某些属性赋值的窗口部件 
+	  子对象 QFrame >QDial 给定窗口部件的直接子窗口
+	  子孙对象 QFrame QDial给定窗口部件的子孙窗口
+	  =========================================
+	  样式表不会注意到属性值的修改。选择器能以各种方式组合
+	  eg:选择所有称作"okButton"的QPushButton，它们的x和y为0，
+	  名为"frame"的QFrame直接子对象
+	  QFrame#frame > QPushButton[x="0"][y="0"]#okButton{
+		...
+	  }
+	  eg:为应用程序的所有的编辑框，组合框等提供通用的设置背景颜色功能:
+	  *[mandatoryField="true"]{
+	    background-color:yellow;
+	  }
+	  通过调用QObject::setProperty()创建一个mandatoryField属性定义
+	  nameLineEdit->setProperty("mandatoryField",true);
+	  genderComboBox->setProperty("mandatoryField",true);
+	  ageSpinBox->setProperty("mandatoryField",true);
+	3). 样式表也可以用来对窗口部件元素的大小和位置进行调整
+	  eg:复选框和单选按钮的状态指示器的大小为20x20像素,指示器和文字之间有8像素的间隙
+	   QCheckBox::indicator,QRadioButton::indicator{ //indicator表示指示器，否则会指定窗口部件的大小而非指示器了
+			width:20px;
+			height:20px;
+	   }
+	   QCheckBox,QRadioButton{
+		  spacing:8px;
+	   }				
+	   ================================================================
+	   辅助控制器	|  			说明
+	   ================================================================
+	   ::indicator	    复选框，单选框，可选菜单项或可选群组框的指示器
+	   ::menu-indicator 按钮的菜单指示器
+	   ::item 		    菜单，菜单栏或状态栏项
+	   ::up-button		微调框或滚动条的向上按钮
+	   ::down-button    微调框或滚动条的向下按钮
+	   ::up-arrow       微调框或滚动条或标题视图的向上箭头
+	   ::down-arrow     微调框或滚动条或标题视图、组合框的向下箭头
+	   ::drop-down		组合框的下拉箭头
+	   ::title			群组框的标题
+	   ================================================================
+	4).样式表还可以用来指定窗口的各个状态
+	  eg:鼠标在复选框文本上悬停时，设置hover为白色 
+	  QCheckBox:hover{
+		color:white;
+	  }
+	  eg:窗口满足所有状态时规则才被使用。当鼠标在一个被选中的复选框上悬停时规则被使用
+	  QCheckBox:checked:hover{
+		color:white;
+	  }
+	  eg:任一状态为true时使用规则
+	  QCheckBox:hover,QCheckBox:checked{
+		color:white;
+	  }
+	  QCheckBox:!checked{
+		color:blue;
+	  }
+	  QComboBox::drop-down:hover{ //状态和辅助控制器合用
+		image:url(:/images/downarrow_bright.png);
+	  }
+	 ===============================================================
+	 状态 |                   说明
+	 ===============================================================	 
+	 :disabled			禁用窗口
+     :enabled			启用窗口
+     :focus				窗口有焦点
+     :hover				鼠标在窗口悬停
+     :pressed			鼠标按键点击窗口
+     :checked			按钮被选中
+	 :unchecked			按钮未被选中
+	 :indeterminate		按钮被部分选中
+	 :open				窗口位于打开或扩展状态
+	 :closed			窗口位于关闭或销毁状态
+	 :on				窗口的状态是"on"
+	 :off				窗口的状态是"off"
+	 ===============================================================	
+	5).实现一个Candy样式表
+	  QDialog{
+		background-color:url(/images/background.png);
+	  }
+	  QLabel{
+		font:9pt;
+		color:rgb(0,0,127);
+	  }
+	  QLineEdit,
+	  QListView{
+		color:rgb(127,0,63);
+		background-color:rgb(255,255,241);
+		selection-color:white;
+		selection-background-color:rgb(191,31,127);
+		border:2px groove gray;
+		border-radius:10px; //边框设置为圆角
+		border-color:red;
+		border-width:2px;
+		border-style:...
+		padding:2px 4px;
+	  }
+	  QListView{
+		padding:5px 4px; //重复时，最后一个生效
+	  }
+	  使用边界图绘制QPushButton按钮
+	  QPushButton{
+		color:white;
+		font:bold 10pt;
+		border-image:url(:/images/button.png) 16;
+		border-width:16px;
+		padding:-16px 0px;
+		min-height:32px;
+		min-width:60px;
+	  }
+	  
+	  可编辑的组合框
+	  QComboBox:editable,
+	  QLineEdit,
+	  QListView{
+		color:rgb(127,0,63);
+		background-color:rgb(255,255,241);
+		selection-color:white,
+		selection-background-color:rgb(192,132,123);
+		border:2px groove gray;
+		border-radius:10px;
+		padding:2px 4px;
+	  }
+	  只读组合框
+	  QComboBox:!editable,
+	  QPushButton{
+		color:white;
+		font:bold 10pt;
+		border-image:url(:/images/button.png) 16;
+		border-width: 16px;
+		padding:-16px 0px;
+		min-height: 32px;
+		min-width: 60px;
+	  }
+	  鼠标在只读组合框或下拉按钮上悬停可修改背景图片
+	  QComboBox:!editable:hover,
+	  QComboBox::drop-down:editable:hover,
+	  QPushButton:hover{
+		border-image:url(:/images/button-hover.png) 16;
+	  }
+	  下拉按钮规则, 修改标准下拉箭头的图片
+	  QComboBox::down-arrow{
+		image:url(:/images/down-arrow.png);
+	  }
+	  组合框是打开的，向下箭头将下移一个像素
+	  QComboBox::down-arrow:on{
+		top:1px;
+	  }
+	  单击组合框时显示一个项的列表，重新指定字体
+	  QComboBox *{
+		font:9pt;
+	  }
+	  设置下拉箭头的属性
+	  QComboBox::drop-down:!editable{
+		subcontrol-origin:padding;  
+		subcontrol-position: center right; //下拉箭头竖直居中,组合框填充矩形的右侧
+		width: 11px; //down-arrow.png的大小
+		height: 6px;
+		background: none; //下拉箭头无需背景色
+	  }
+	  可编辑组合框，配置下拉按钮
+	  QComboBox::drop-down:editable{
+		border-image:url(:/images/button.png) 16;
+		border-width:10px;
+		subcontrol-origin:margin;
+		subcontrol-position:center right;
+		width:  7px;
+		height: 6px;
+		margin-right:29px; //右置的29像素区域为下拉框提供空间
+	  }
+	  //组合框打开使用一个不同的图片作为下拉按钮:
+	  QComboBox::drop-down:editable:open{
+		border-image:url(:/images/button-pressed.png) 16;
+	  }
+	 
+	 
+========================================================================
+1.
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+	if (okToContinue()){
+		writeSettings();  //
+		event->accept();  //
+	} else {
+		event->ignore();  //
+	} 
+}
+
+2.
+void MainWindow::updateRecentFileActions()
+{
+	QMutableStringListIterator it(recentFiles); //QStringList recentFiles;
+	while (it.hasNext()){
+		if (!QFile::exists(it.next()))
+		   it.remove();
+	}
+}
+3.void MainWindow::openRecentFile()
+{
+	if (okToContinue()){//在Qt的moc所生成的元信息基础上执行动态类型强制转换(dynamic cast)，返回一个指向所需QObject子类的指针或0.
+						//与标准C++的dynamic_cast<T>()不同,qobject_cast<T>()可正确地跨越动态库边界。若明确sender()类型是QAction
+						//则可用static_cast<T>()或C转换替换此数据转换方式
+		QAction *action = qobject_cast<QAction *>(sender()); //QObject::sender()
+		if (action)
+		  loadFile(action->data().toString());
+	}
+}
+
+4.
+void MainWindow::find()
+{
+	if (!findDialog){
+		findDialog = new FindDialog(this);
+		connect(findDialog,SIGNAL(findNext(const QString&,Qt::CaseSensitivity),
+				spreadsheet,SLOT(findNext(const QString& Qt::CaseSensitivity)));
+				
+		connect(findDialog,SIGNAL(findPrevious(const QString&,Qt::CaseSensitivity),
+				spreadsheet,SLOT(findPrevious(const QString& Qt::CaseSensitivity)));	
+	}
+	findDialog->show(); //非模态，setModal()可使其变为模态对话框。对话框是隐藏的，可使其变为可见的、位于最上方并且使激活的。
+	findDialog->raise();//对话框已经是可见时，show()不做任何事情，必须调用raise()和activateWindow()
+						//使窗口成为顶层窗口和激活状态
+	findDialog->activateWindow();
+	//or: 有些多余，但好理解
+	//if (findDialog->isHidden()){
+	//    findDialog->show();
+    //} else {
+	//   findDialog->raise();
+	//   findDialog->activateWindow();
+	//}
+}
+
+5.
+void MainWindow::goToCell()
+{
+	GoToCell dialog(this);
+	if (dialog.exec()){//true:QDialog::Accepted,false:QDialog::Rejected
+	  QString str = dialog.lineEdit->text.toUpper();
+	}
+}
+
+6.
+void MainWindow::about()
+{
+  //QMessageBox::warning()
+  QMessageBox::about(this,tr("About Spreadsheet"),
+                     tr("<h2>Spreadsheet 1.1</h2>"
+					    "<p>Copyright &copy;2008 Software Inc."));
+}
+
+7.void MainWindow::newFile()
+  {
+	MainWindow *mainWin = new MainWindow; //new 的对象没有删除,解决办法:WA_DeleteOnClose
+	mainWin->show();
+  }
+  MainWindow::MainWindow()
+  {
+	...
+	setAttribute(Qt::WA_DeleteOnClose); //Qt在关闭窗口时将其删除
+	...
+  }
+
+8.
+bool Spreadsheet::writeFile(const QString &fileName)
+{
+	QFile file(fileName);
+	if (!file.open(QIODevice::WriteOnly)){
+	   QMessageBox::warning(this,tr("Spreadsheet"),
+		tr("Cannot write file %1:\n%2.").arg(file.fileName())
+		.arg(file.errorString()));
+	  return false;
+	}
+	QDataStream out(&file);
+	out.setVersion(QDataStream::Qt_4_3);
+	
+	out << quint32(MagicNumber);
+	QApplication::setOverrideCursor(Qt::WaitCursor);
+	for (int row = 0; row < RowCount; ++row){
+		for (int column = 0; column < ColumnCount;++column){
+			QString str = formula(row,column);
+			if (!str.isEmpty())
+			  out << quint16(row) << quint16(column) << str;
+		}
+	}
+	QApplication::restoreOverrideCursor();
+	return true;
+}
+
+bool Spreadsheet::readFile(const QString &fileName)
+{
+	QFile file(fileName);
+	if (!file.open(QIODevice::ReadOnly)){
+		return false;
+	}
+	QDataStream in(&file);
+	in.setVersion(QDataStream::Qt_4_3); //指定需要哪个版本的QDataStream读取数据
+	
+	quint32 magic;
+	in >> magic;
+	if (magic != MagicNumber){
+		return false;
+	}
+	clear();
+	
+	quint16 row;
+	quint16 column;
+	QString str;
+	QApplication::setOverrideCursor(Qt::WaitCursor);
+	while(!in.atEnd()){
+		in >> row >> column >> str;
+		setFormula(row,column,str);
+	}
+	QApplication::restoreOverrideCursor();
+	return true;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

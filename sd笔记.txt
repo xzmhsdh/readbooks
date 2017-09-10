@@ -1,0 +1,546 @@
+https://zhidao.baidu.com/question/1801302655019737187.html
+
+http://wsbs.gz.gov.cn/gz/wsbs/getServiceGuide.action?serviceItemCode=gz5011001
+
+/*
+#include <stdio.h>
+//函数指针 
+int jug(int x,int y)
+{
+if(x >= 0)
+   return x;
+    else
+    if (y == 0)
+       return x;
+    else 
+       return x/y;
+} 
+int sub(int x,int y)
+{
+return (x+y);
+}
+int minus(int x,int y)
+{
+return (x-y);
+}
+void test(int (*p)(int,int),int a,int b)
+{
+int Int1;
+Int1 = (*p)(a,b);
+printf("a=%d,b=%d,ret=%d\n",a,b,Int1);
+}
+
+int main()
+{
+int a=1,b=2,c=3,d=4,e=-5;
+test(sub,a,b);
+test(minus,c,d);
+test(jug,e,b);
+return 0;
+}
+*/
+
+//静态模板实现
+#include <iostream>
+using namespace std;
+
+template<class T>
+class Operate
+{
+  public:
+  static T Add(T a,T b)
+  {
+  	return a+b;
+  }
+  static T Mul(T a,T b)
+  {
+  	return a*b;
+  }
+  static T Judge(T a, T b=1)
+  {
+  	if ( a >= 0)
+  	 return a;
+    else
+     return a/b;
+  }
+};
+int main()
+{
+int a=1,b=2,c=3,d=4,e=5,x,y,z;
+x = Operate<int>::Add(a,b);
+y = Operate<int>::Mul(c,d);
+z = Operate<int>::Judge(e,b);
+cout << x << "\n" << y << "\n" << z << endl;
+return 0;
+}
+降温 13:37:20
+#include <iostream>
+using namespace std;
+template<typename t>
+struct tcontainer
+{
+virtual void push(const t&) = 0;
+virtual void pop() = 0;
+virtual const t& begin() = 0;
+virtual const t& end() = 0;
+virtual size_t size() = 0;
+};
+template<typename t>
+struct tvector: public tcontainer<t>
+{
+static const size_t _step = 100;
+tvector()
+{
+_size = 0;
+_cap = _step;
+buf = 0;
+re_capacity(_cap);
+}
+~tvector()
+{
+free(buf);
+}
+void re_capacity(size_t s)
+{
+if (!buf)
+  buf = (t*)malloc(sizeof(t)*s);
+        else
+          buf = (t*)realloc(buf,sizeof(t)*s);
+}
+virtual void push(const t& v)
+{
+if (_size > _cap)
+  re_capacity(_cap += _step);
+        buf[_size++] = v;
+}
+virtual void pop()
+{
+if (_size)
+  _size--;
+}
+virtual const t& begin()
+{
+return buf[0];
+}
+virtual const t& end()
+{
+   if(_size)
+     return buf[_size-1];
+}
+
+virtual size_t size()
+{
+return _size;
+}
+const t& operator[] (size_t i)
+{
+if (i >=0 && i < _size)
+  return buf[i];
+}
+private:
+size_t _size;
+size_t _cap;
+t* buf;
+};
+int main()
+{
+tvector<int> v;
+for (int i = 0;i < 50; i++)
+  v.push(i);
+    for (int i = 0;i < 50; ++i)
+      std::cout << v[i] << std::endl;
+}
+ 2017-04-14 
+降温 12:53:38
+#include <iostream>
+#include <string>
+#include <vector>
+using namespace std;
+class B
+{
+  private:
+  int data;
+  public:
+   B()
+   {
+     cout << "default constructor"<< endl;
+   }
+   ~B(){
+   	cout << "destructed" <<endl;
+   }
+   //explicit B(int i):data(i) //消除隐含转换 
+   B(int i):data(i) //单个参数的构造函数会定义一个隐含的类型转换,从参数的类型转换到自己 
+   {
+   	  cout << "constructed by parameter " << data << endl;
+   }
+};
+B play(B b)
+{
+return b;
+}
+int main()
+{
+B temp = play(5);
+return 0;
+}
+降温 13:13:25
+#include <string>
+class MyString
+{
+  public:
+  MyString(const char *str=NULL);
+  MyString(const MyString& other);
+  ~MyString(void);
+  MyString &operator=(const MyString &other);
+  private:
+  char *m_data;
+};
+MyString::~MyString()
+{
+delete [] m_data;
+}
+
+MyString::MyString(const char *str)
+{
+   if (str==NULL)
+   {
+   	  m_data = new char[1];
+   	  m_data = '\0';
+   }
+   else
+   {
+   	 m_data = new char[strlen(str)+1];
+   	 strcpy(m_data,str);
+   }
+}
+MyString::MyString(const MyString& other)
+{
+   	m_data = new char[strlen(other.m_data)+1];
+   	strcpy(m_data,other.m_data);
+}
+MyString &MyString::operator=(const MyString &other)
+{
+  if (this == &other)
+    return *this;
+  delete [] m_data;
+  m_data = new char[strlen(other.m_data)+1];
+  strcpy(m_data,other.m_data);
+  return *this;
+}
+降温 17:18:09
+https://www.deppon.com/jiageresult/
+ 2017-04-15 
+降温 9:01:12
+void TCRMMChooseChanceForm::DateSelect(int tag)
+{
+  TDateTime BeginDate,EndDate;
+       Word Year, Month, Day;
+  DecodeDate(Date(), Year, Month, Day);
+  switch (tag) {
+    case 100: //今天
+        dtpBeginDateEdit->Date = Date();
+        dtpEndDateEdit->Date   = Date();
+        break;
+    case 101: //本周
+        dtpBeginDateEdit->Date = Date() - (DayOfWeek(Date()) - 1);
+        dtpEndDateEdit->Date   = Date() + (7 - DayOfWeek(Date()));
+        break;
+    case 102: //上周
+        dtpBeginDateEdit->Date = Date() - (DayOfWeek(Date()) - 1) - 7;
+        dtpEndDateEdit->Date   = Date() + (7 - DayOfWeek(Date())) - 7;
+        break;
+    case 103: //本月
+        BeginDate     = EncodeDate(Year, Month, 1);
+        dtpBeginDateEdit->Date = BeginDate;
+        if (Month == 12)
+            EndDate = EncodeDate(Year, 12, 31);
+        else
+            EndDate       = EncodeDate(Year, Month + 1, 1) - 1;
+        dtpEndDateEdit->Date = EndDate;
+        break;
+    case 10301: //本月上旬
+        BeginDate           = EncodeDate(Year, Month, 1);
+        dtpBeginDateEdit->Date = BeginDate;
+        EndDate             = EncodeDate(Year, Month, 10);
+        dtpEndDateEdit->Date   = EndDate;
+        break;
+    case 10302: //本月中旬
+        BeginDate           = EncodeDate(Year, Month, 11);
+        dtpBeginDateEdit->Date = BeginDate;
+        EndDate             = EncodeDate(Year, Month, 20);
+        dtpEndDateEdit->Date   = EndDate;
+        break;
+    case 10303: ////本月下旬
+        BeginDate           = EncodeDate(Year, Month, 21);
+        dtpBeginDateEdit->Date = BeginDate;
+        if (Month < 12) {
+            EndDate           = EncodeDate(Year, Month + 1, 1);
+            dtpEndDateEdit->Date = EndDate - 1;
+        } else
+            dtpEndDateEdit->Date = EncodeDate(Year, 12, 31);
+        break;
+    case 104: //上月
+        if (Month == 1) {
+            BeginDate           = EncodeDate(Year - 1, 12, 1);
+            dtpBeginDateEdit->Date = BeginDate;
+
+            EndDate           = EncodeDate(Year - 1, 12, 31);
+            dtpEndDateEdit->Date = EndDate;
+        } else {
+            BeginDate           = EncodeDate(Year, Month - 1, 1);
+            dtpBeginDateEdit->Date = BeginDate;
+
+            EndDate           = EncodeDate(Year, Month, 1);
+            dtpEndDateEdit->Date = EndDate - 1;
+        }
+        break;
+    case 105: //本年
+        BeginDate           = EncodeDate(Year, 1, 1);
+        dtpBeginDateEdit->Date = BeginDate;
+        EndDate             = EncodeDate(Year, 12, 31);
+        dtpEndDateEdit->Date   = EndDate;
+        break;
+    case 106: //上年
+        BeginDate           = EncodeDate(Year - 1, 1, 1);
+        dtpBeginDateEdit->Date = BeginDate;
+        EndDate             = EncodeDate(Year - 1, 12, 31);
+        dtpEndDateEdit->Date   = EndDate;
+        break;
+    }
+}
+降温 9:22:36
+http://www.gzgjj.gov.cn/web/static/articles/catalog_2c9032504e77627c014e99df718602c6/2015-12-02/article_2c90325041ef22c801425be1833806de/2c90325041ef22c801425be1833806de.html
+降温 10:38:22
+AtomSetup
+降温 11:01:21
+class Solution(object):
+    def poorPigs(self, buckets, minutesToDie, minutesToTest):
+        """
+        :type buckets: int
+        :type minutesToDie: int
+        :type minutesToTest: int
+        :rtype: int
+        """
+        return int(math.ceil(math.log(buckets, 1 + minutesToTest / minutesToDie)))
+降温 11:01:31
+有1000个桶，有且仅有一个桶含有毒药，剩下的桶装的是水。它们外观相同。猪饮用毒药会在15分钟后死亡。最少需要多少头猪才能在1小时之内分辨出装毒药的桶？
+降温 11:16:49
+降温 22:05:22
+ 
+降温 22:05:36
+ 
+降温 22:05:39
+ 
+ 2017-04-16 
+降温 22:53:50
+http://www.xbwl.cn/views/html/selfservice/priceSearch/ec/beginCity/%E5%B9%BF%E4%B8%9C-%E5%B9%BF%E5%B7%9E-%E5%A4%A9%E6%B2%B3%E5%8C%BA/endCity/%E5%9B%9B%E5%B7%9D-%E6%88%90%E9%83%BD-%E9%AB%98%E6%96%B0%E5%8C%BA/level2Id/500023
+ 2017-04-17 
+降温 10:01:01
+#include <new>
+#include <iostream>
+#include <tchar.h>  //4
+using namespace std;
+
+class NameStr
+{
+public:
+  NameStr()
+  {
+  	static const char s_szDefaultName[] = "Default name";
+  	static const char s_szDefaultStr[] = "Default string";
+  	m_pName = new char[strlen(s_szDefaultName)+1]; //1
+  	m_pData = new char[strlen(s_szDefaultStr)+1];
+  	strcpy(m_pName,s_szDefaultName);
+  	strcpy(m_pData,s_szDefaultStr);
+  }
+  NameStr(const char *pName,const char *pData)
+  {
+  	m_pName = new char[strlen(pName)+1]; //2
+  	m_pData = new char[strlen(pData)+1];
+  	strcpy(m_pName,pName);
+  	strcpy(m_pData,pData);
+  }
+  
+  NameStr &operator=(const NameStr &namestr); //5
+  ~NameStr()
+  {
+    delete [] m_pData; //3
+    delete [] m_pName;
+  }
+  NameStr(const NameStr &namestr) //5 
+  {
+  	 m_pName = new char[strlen(namestr.m_pName)+1];
+  	 m_pData = new char[strlen(namestr.m_pData)+1];
+  	 strcpy(m_pName,namestr.m_pName);
+  	 strcpy(m_pData,namestr.m_pData);
+  }
+  
+  void Print()
+  {
+  	cout << "Name:" << m_pName << endl;
+  	cout << "String:" << m_pData << endl;
+  }
+  private:
+   char *m_pName;
+   char *m_pData;
+};
+
+NameStr &NameStr::operator=(const NameStr &namestr)
+{
+  	if (this == &namestr)
+  	  return *this;
+    delete [] m_pData;
+    delete [] m_pName;
+    m_pName = new char[strlen(namestr.m_pName)+1];
+    m_pData = new char[strlen(namestr.m_pData)+1];
+    strcpy(m_pName,namestr.m_pName);
+    strcpy(m_pData,namestr.m_pData);
+    return *this;
+}
+
+int _tmain(int argc,_TCHAR* argv[])
+{
+   NameStr *pDefNss = NULL;
+   try
+   {
+   	   pDefNss = new NameStr[10];
+   	   NameStr ns("Kingsoft string","This is for test.");
+   	   ns.Print();
+   	   NameStr nm(ns);
+   	   ns = nm;
+   	   nm.Print();
+   }
+   catch(...)
+   {
+   	 cout << "Exception!" << endl; 
+   }
+   delete pDefNss;
+   return 0;
+}
+ 2017-04-18 
+降温 9:57:53
+//模板类的友元重载
+#include <iostream>
+using namespace std;
+
+template <class T>
+class Test;
+
+template <class T>
+ostream& operator<<(ostream &out,const Test<T> &obj);
+
+template <class T>
+class Test
+{
+  private:
+    int num;
+  public:
+    Test(int n=0){num = n;}
+    Test(const Test<T> &obj){
+      num = obj.num;
+    }
+  friend ostream& operator<< <> // "<<" 后面加"<>"表示其是一个函数模板
+   (ostream &out,const Test<T> &obj);
+};
+
+template <class T>
+ostream& operator<<(ostream& out,const Test<T> &obj){
+  out << obj.num;
+  return out;
+}
+
+int main(int argc, char* argv[])
+{
+   Test<int> t(2);
+   cout << t; 
+   return 0;
+}
+降温 11:02:41
+#include <iostream>
+using namespace std;
+
+class A
+{
+  protected:
+   int m_data;
+  public:
+    A(int data=0)
+{
+m_data = data;
+}
+int GetData()
+    {
+    	return doGetData();
+    }
+    virtual int doGetData()
+    {
+    	return m_data;
+    }
+};
+class B:public A
+{
+  protected:
+   int m_data;
+  public:
+   B(int data=1)
+   {
+   	  m_data = data;
+   }
+   int doGetData()
+   {
+   	  return m_data;
+   }
+};
+class C:public B
+{
+  protected:
+   int m_data;
+  public:
+   C(int data=2)
+   {
+   	  m_data = data;
+   }
+};
+int main()
+{
+   C c(10);
+   cout << c.GetData() << endl;    //c.getdata->b.getdata->a.getdata,a.dogetdata->b.dogetdata 1
+   cout << c.A::GetData() << endl; //a.getdata,a.dogetdata->b.dogetdata 1
+   cout << c.B::GetData() << endl; //b.getdata->a.getdata,a.dogetdata->b.dogetdata 1
+   cout << c.C::GetData() << endl; //c.getdata->b.getdata->a.getdata,a.dogetdata->b.dogetdata 1
+   cout << c.doGetData() << endl;  //c.dogetdata->b.dogetdata 1
+   cout << c.A::doGetData()<< endl;//a.dogetdata  0
+   cout << c.B::doGetData()<< endl;//b.dogetdata  1
+   cout << c.C::doGetData()<< endl;//c.dogetdata->b.dogetdata 1
+   system("PAUSE");
+   return 0;
+}
+降温 11:17:50
+#include <iostream>
+using namespace std;
+class A{
+  public:
+   void virtual f(){
+   	  cout << "A" << endl;
+   }
+};
+class B:public A{
+public:
+void virtual f(){
+  cout << "B" << endl;
+}
+};
+int main()
+{
+A *pa = new A();
+pa->f();
+B *pb = (B*)pa;//pb = pa;
+pb->f();
+
+delete pa,pb;
+pa = new B();
+pa->f();
+pb = (B*)pa; //B* :pb = pa
+pb->f();
+return 0;
+}
