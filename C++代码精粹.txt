@@ -1,0 +1,19 @@
+第1章
+
+1.单参数构造函数，声明explicit阻止隐式转换，否则在一个转换序列中只允许一个隐式的用户定义转换，编译器不能提供2个以上的用户定义自动转换。
+
+2.类型安全连接
+  C语言连接器无法区分函数参数类型的不同，而C++连接器对函数进行了名字改编，如void f(int)
+  ->f_Fi,void f(double) -> f_Fd，名字不同C++连接器会报错，而C无法区分。
+  
+3.引用 函数参数声明为引用，函数可能会修改被引用对象的值，加const阻止函数修改原始值。函数可返回一个引用的对象，int& f();  f() = 10; std::vector<int>& f1(); f1()[i] = 10;
+
+4.类型安全I/O
+double d; printf("%d\n",d); /*错误:应该是%f*/
+double d; cout << d; /*不会出错:cout << d被翻译成带有流和double参数的函数调用:operator<<stream&,double*/
+打印精度:double x = 1.5, = 2.5; cout.precision(2); cout.setf(ios::showpoint); cout << x << "\n"; cout << y << "\n";
+
+打印C类型字符串或字符数组的地址,将其转换为void *: char s[] =  ...; cout << (void *) s << "\n";
+
+>>操作默认是跳过空格字符的，cin.unsetf(ios::skipws); //不跳过空格
+setf设置格式化的位掩码，unsetf复位位掩码。
