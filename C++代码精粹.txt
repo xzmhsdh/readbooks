@@ -3,7 +3,7 @@
 1.单参数构造函数，声明explicit阻止隐式转换，否则在一个转换序列中只允许一个隐式的用户定义转换，编译器不能提供2个以上的用户定义自动转换。
 
 2.类型安全连接
-  C语言连接器无法区分函数参数类型的不同，而C++连接器对函数进行了名字改编，如void f(int)
+  C语言连接器无法区分函数参数类型的不同，而C++连接器对函数进行了名字改编，如void f(int)+
   ->f_Fi,void f(double) -> f_Fd，名字不同C++连接器会报错，而C无法区分。
   
 3.引用 函数参数声明为引用，函数可能会修改被引用对象的值，加const阻止函数修改原始值。函数可返回一个引用的对象，int& f();  f() = 10; std::vector<int>& f1(); f1()[i] = 10;
@@ -17,3 +17,532 @@ double d; cout << d; /*不会出错:cout << d被翻译成带有流和double参�
 
 >>操作默认是跳过空格字符的，cin.unsetf(ios::skipws); //不跳过空格
 setf设置格式化的位掩码，unsetf复位位掩码。
+
+设置8进制模式:cout.setf(ios::oct,ios::basefield);
+	   16进制:cout.setf(ios::hex,ios::basefield);
+	打印0或0x:cout.setf(ios::showbase);
+    大写0或0X:cout.setf(ios::uppercase);
+	
+操纵器:可代替显示调用setf函数，更为高效
+boolalpha <==> setf(boolalpha)	显示true或false 而非1或0
+showbase  <==> setf(showbase)
+...
+unitbuf   <==> 	setf(unitbuf)   插入操作数后立即刷新缓冲区
+nounitbuf <==>  unsetf(unitbuf) 插入操作数后不立即刷新缓冲区 
+hex		  <==>  setf(hex,basefield)
+endl	  <==>  insert a newline and calls flush()
+ends      <==>  insert a '\0'   插入一个空字符
+eg:
+cout << dec << x << oct << y << hex << z << endl;
+  
+带参数的操纵器:
+setw(n) <==> width(n) :设置输出域宽
+eg1:
+cout << "|" << setw(10) << "hello" << "|" << endl;
+cout.setf(ios::let,ios::adjustfield);
+cout << "|" << setw(10) << "hello" << "|" << endl;
+cout.fill('#')
+cout << "|" << setw(10) << "hello" << "|" << endl;
+-> |     hello|
+   |hello     |
+   |hello#####|
+eg2:
+char s1[10],s2[3],s3[20];
+cin >> setw(10) >> s1 >> setw(3) >> s2 >> s3;//编译器默认以空格作为分隔符，输入字符串不能包含空格否则结果会不同
+
+eg3:
+控制铃声操纵器
+#include <iostream>
+ostream& beep(ostream& os)
+{
+	os << char(7); //ASCII响铃
+	return os;
+}   
+使用: cout << ... << beep << ...
+	
+5.运算符重载
+不允许重载系统预定义的操作，在重载操作中至少有一个操作数是用户自定义类型。
+cout 是 ostream类的一个实例,它为所有的系统预定义的数据类型都重载了操作符<<
+,当编译器看到表达式:cout << i (i是int)，编译器便产生函数运算:
+cout.operator<<(i); //其对应的ostream类函数原型: ostream::operator<<(ostream&,int)
+
+
+eg：
+struct complex
+{
+	double real,imag;
+	complex(double = 0.0,double = 0.0);
+};	
+complex::complex(double r,double i)
+{
+  real = r;
+  imag = i;
+}
+
+inline ostream& operator<<(ostream &os,const complex &c)
+{
+	os << "(" << c.real << "," << c.imag << ")";
+	return os;
+}
+inline complex operator+(const complex &c1,const complex &c2)
+{
+	return complex(c1.real + c2.real,c1.imag + c2.imag);
+}
+---
+cout << c --> operator<<(cout, c)
+cout << c1 << c2 --> operator<<(operator<<(cout,c1),c2);
+
+6.内联函数
+没有函数调用和宏定义的副作用
+#define min(x,y) ((x) < (y) ? (x) : (y))
+当min(x++,y++) -->操作失败
+而内联函数则没有此问题
+
+7.C的兼容性
+可用const和枚举常量定义c++中的数组大小
+const int SIZE =100;
+enum {BIGGER=1000}
+int a[SIZE],b[BIGGER];
+---
+全局const声明默认是内部链接的，而C是外部连接的，c++要外部连接需加extern
+C中：可以将指向任意类型的指针指向空类型void*或者将指针从空类型void*指向其他类型。
+c++中：不允许在没有转换类型的情况下从一个空类型指针指向其他类型。
+C中：若函数定义时漏掉了一些参数，编译器不此检查，可以向它传递任何数量和类型的参数
+c++中：原型f等价f(void),如果要坚持使用不安全的C行为,可使用f(...)。
+
+
+第2章
+
+1.普通指针
+memcpy:
+struct mystruct a,b;
+memcpy(&a,&b,sizeof(struct mystruct));
+memcpy的头两个参数为void型指针,可以不需要强制类型转换将任何类型的指针赋予void*类型,也可以在C而不是C++中将void*赋予任何其他类型的指针:
+void* memcpy(void *target,const void* source,size_t n)
+{
+	char *targetp = (char*)target; //必须将指向void的指针赋予指向char的指针,这样它就可以每次传递内存块的一个字节,并拷贝.
+	const char *sourcep = (const char *)source;  //试图解引用一个void*是没有意义的，因为它的大小是未知的
+	while(n--)
+	  *targetp++ = *sourcep++;
+	return target;
+}
+
+2.const指针
+eg:打印任何对象的不同字节
+#include <iostream>
+#include <iomanip>
+using namespace std;
+void inspect(const void *ptr,size_t nbyts)
+{
+	const unsigned char *p = (const unsigned char*) ptr;
+	cout.setf(ios::hex,ios::basefield);
+	for(int i = 0; i < nbyts; ++i)
+	 cout << "byte " << setw(2) << setfill(' ') << i
+	  << ":  " << setw(2) << setfill('0') << int(p[i]) << endl;
+}
+
+main()
+{
+	char  c  = 'a';
+	short i  = 100;
+	long  n  = 100000L;
+	double pi  = 3.141529;
+	char s[] = "hello";
+	
+	inspect(&c,sizeof c); cout << endl;
+	inspect(&i,sizeof i); cout << endl;
+	inspect(&n,sizeof n); cout << endl;
+	inspect(&pi,sizeof pi); cout << endl;
+	inspect(s,sizeof s); cout << endl;
+}
+
+3.指针和一维数组
+int a[4] = {0,1,2,3},b[4];
+除了在声明中或者当一个数组名是sizeof运算符或者&运算符的操作数之外,编译器总是把数组名解释成指向它的第一个元素的指针。
+a = &a[0] <==> *a == a[0]
+	
+使用相反的下标:如果一个指针p传递一个数组,可以使用p[-1]获得*p之前的元素,由于p[-1] == *(p - 1);
+
+size_t n = sizeof a  / sizeof a[0];
+
+strncpy(s,t,n)[n] = '\0';
+
+一个字符串中的字符是一个匿名数组,eg:
+#include <iostream>
+using namespace std;
+main()
+{
+	char a[] = "hello";
+	char *p  = a;
+	cout << "a == " << &a << ",sizeof a ==" << sizeof a << endl;
+	cout << "p == " << (void*)p << ", sizeof p == " << sizeof p << endl;
+	cout << "address of \"hello\" == " << sizeof "hello" << endl;
+	cout << "address of \"hello\" == " << (void*)"hello" << endl; //两次的地址值不一样
+	cout << "address of \"hello\" == " << (void*)"hello" << endl; 
+}
+
+将字符串的字符进行索引,eg:
+#include <iostream>
+using namespace std;
+main()
+{
+  for (int i = 0;i < 10; i += 2)
+     cout << "0123456789"[i];
+}
+
+字符串拷贝,eg:
+void str_cpy(char *s1,char *s2)
+{
+	while(*s1++ = *s2++);
+}
+
+2种方式描述C风格的字符串数组:(1)指针数组(粗糙的数组) (2).二维数组
+(1):char * string[] = {"now","is","the","time"};
+eg:
+main()
+{
+	char * string[] = {"now","is","the","time"};
+	size_t n = sizeof string / sizeof string[0];
+	for (int i = 0; i < n; ++i)
+	 cout << "String " << i << " == \" << string[i]
+	     << "\",\t size == " << sizeof string[i]
+		 << ",\tlength == " << strlen(string[i]) << endl;
+}
+//printf
+String 0 == "now", size == 4, length ==3;
+String 0 == "is", size == 4, length ==2;
+String 0 == "the", size == 4, length ==3;
+String 0 == "time", size == 4, length ==4;
+
+(2).char array[][5] = {"now","is","the","time"};
+//printf
+String 0 == "now", size == 5, length ==3;
+String 0 == "is", size == 5, length ==2;
+String 0 == "the", size == 5, length ==3;
+String 0 == "time", size == 5, length ==4;
+ 
+4.指针和多维数组： c++中没有多维数组!!!!
+在二维数组中指向一维数组的指针,eg:
+#include <iostream>
+main()
+{
+	int a[][4] = {{0,1,2,3},{4,5,6,7},{8,9,0,1}};
+	int (*p)[4] = a; //指向包含4个整型成员的数组
+	size_t nrows = sizeof a /sizeof a[0];
+	size_t ncols = sizeof a[0] / sizeof a[0][0];
+	
+	cout << "sizeof (*p) == " << sizeof *p << endl;
+    for (int i = 0; i < nrows; ++i)
+	{
+		for (int j = 0; j < ncols; ++j)
+		  cout << p[i][j] << ' ' ;
+		cout << endl;
+	}	
+	
+}
+在三维数组内指向二维数组的指针
+#include <iostream>
+using namespace std;
+main()
+{
+	int a[][3][4]= {{{0,1,2,3},{4,5,6,7},{8,9,0,1}},
+					{{2,3,4,5},{6,7,8,9},{0,1,2,3}}};
+	int (*p)[3][4] = a;
+	size_t ntables = sizeof a  / sizeof a[0];
+	size_t nrows = sizeof a[0] / sizeof a[0][0];
+	size_t ncols = sizeof a[0][0] / sizeof a[0][0][0];
+	
+	cout << "sizeof (*p) == " << sizeof *p << endl;
+    cout << "sizeof (a[0][0]) == " << sizeof a[0][0] << endl;
+    for (int i = 0; i < ntables; ++i)
+	{
+		for (int j = 0; j < nrows; ++j)
+		{
+			for (int k = 0; k < ncols; ++k)
+			  cout << p[i][j][k] << ' ';
+			cout << endl;
+		}
+		cout << endl;
+	}
+}
+
+指向函数的指针
+int (*fp) (); //声明fp是一个指向返回值为整型(int)的函数的指针。
+#include <stdio.h>
+main(){
+ void (*fp)() = printf;
+ fp("hello,world\n");
+}
+
+一个函数(像qsort)通过由运行时决定的指针来调用另一个函数(像comp)的行为叫做回调(callback)。
+
+用qsort函数将命令行参数排序
+eg:
+#include <iostream>
+#include <cstring>
+#include <cstdlib>
+int comp(const void *,const void *);
+main(int argc,char *argv[])
+{
+	qsort(argv+1,argc-1,sizeof argv[0],comp);
+	while(--argc)
+	  cout << *++argv << endl;
+}
+int comp(const void* p1, const void* p2)
+{
+	const char *ps1 = *(const char**)p1; // how to understand???
+	const char *ps2 = *(char**)p2;
+	return strcmp(ps1,ps2);
+}
+
+用函数指针数组来处理菜单选择
+eg:
+#include <stdio.h>
+//菜单项
+extern void retrieve(void);
+extern void insert(void);
+extern void update(void);
+extern int show_menu(void);
+main()
+{
+   int choice;
+   void (*farray[])(void) = {retrieve,insert,update};
+   for (;;){
+	  choice = show_menu();
+	  if (choice >= 1 && choice <= 3)
+	     farray[choice - 1]();
+	  else if (choice == 4)
+	     break;
+   }
+   return 0;
+}
+
+指向成员函数的指针
+class C{
+  public:
+	void f() {cout << "C::f\n";}
+	void g() {cout << "C::g\n";}
+};
+//可定义一个指向C类成员函数的指针
+void (C::*pmf)(); //pmf是指向C的成员函数的指针
+main(){
+ C c;
+ void (C::*pmf)() = &C::f;
+ (c.*pmf)();
+ pmf = &C::g;
+ (c.*pmf)();
+}
+//如果cp是一个指向C的指针可使用(cp->*pmf)();
+菜单例子指向成员函数指针的版本:
+eg:#include <iostream>
+using namespace std;
+class Object{
+public:
+ void retrieve() {cout << "Object::retrieve\n";}
+ void insert() {cout << "Object::insert\n";}
+ void update() {cout << "Object::update\n";}
+ void process(int choice);
+private:
+ typedef void (QObject::*Omf)();
+ static Omf farray[3];
+};
+Object::Omf Object::farray[3] = {&Object::retrieve,&Object::insert,&Object::update};
+void Object::process(int choice)
+{
+	if (0 <= choice && choice <= 2)
+	  (this->*farray[choice])();
+}
+main()
+{
+	int show_menu();
+	Object o;
+	for (;;){
+		int choice = show_menu();
+	    if (1 <= choice && choice <= 3)
+			o.process(choice-1);
+		else if (choice == 4)
+		    break;
+	}
+}
+
+封装和不完全类型
+1.一般的封装
+//tstack.h
+class StackOfInt{
+ public:
+  StackOfInt();
+  void push(int);
+  int pop();
+  int top() const;
+  int size() const;
+private:
+  enum {MAX_STACK=100};
+  int data[MAX_STACK];
+  int stkPtr;
+};
+//tstack.cpp
+#include <iostream>
+#include "tstack.h"
+using namespace std;
+StackOfInt::StackOfInt() { stkPtr = 0;}
+void StackOfInt::push(int i){
+	if (stkPtr == MAX_STACK) throw "overflow";
+	data[stkPtr++] = i;
+}
+int StackOfInt::pop(){
+	if (stkPtr == 0) throw "underflow";
+	return data[--stkPtr];
+}
+
+int StackOfInt::top(){
+	if (stkPtr == 0) return "underflow";
+	return data[stkPtr - 1];
+}
+int StackOfInt::size() const{
+	return stkPtr;
+}
+
+main(){
+  StackOfInt s;
+  s.push(10);
+  s.push(20);
+  s.push(30);
+  while(s.size()) cout << s.pop() << endl;
+}
+//更好地封装而使用不完全类型
+class StackImp;
+class StackOfInt{
+  public:
+    StackOfInt();
+	~StackOfInt();
+	void push(int);
+	int pop();
+	int top() const;
+	int size() const;
+private:
+    StackImp* imp;
+};
+StackOfInt::StackOfInt():
+   imp(new StackImp){}
+StackOfInt::~StackOfInt() {delete imp;}
+void StackOfInt::push(int i) {imp->push(i);}
+int StackOfInt::pop() {return imp->pop();}
+int StackOfInt::top() const { return imp->top();}
+int StackOfInt::size() const {return imp->size();}
+//StackImp的实现
+StackImp::StackImp(){ stkPtr = 0;}
+void StackImp::push(int i){
+  if (stkPtr == MAX_STACK) throw "overflow";
+  data[stkPtr++] = i;
+}
+void StackImp::pop(){
+  if (stkPtr == 0) throw "underflow";
+  return data[--stkPtr];
+}
+int StackImp::top() const {
+  if (stkPtr == 0) throw "underflow";
+  return data[stkPtr - 1];
+}
+int StackImp::size() const{
+  return stkPtr;
+}
+
+除非在sizeof 和 &的上下文中，否则一个数组名即是指向它第一个元素的指针
+
+第3章
+预处理器 
+1.因为标准头文件的名字是特殊预处理记号，而不是字符串，所以在头文件名中出现的任何反斜杠符号都不是转义字符.
+eg: #include <sys\stat.h>
+    #include "\project\include\mydefs.h"
+
+2.防止文件重复包含
+  #ifndef MYDEFS_H
+  #define MYDEFS_H
+  ....
+  #endif
+  
+3.类函数宏:在宏名和左边第一个括号之间一定不能有空格，beep () is error.
+#define beep() putc('\a',stderr)
+#define abs(x) ( (x)>=0 ? (x) : ((-x)) )
+#define max(x,y) ( ((x) > (y)) ? (x) : (y) )
+类函数的宏在C++中几乎是没有必要的,可用内联替代,针对宏形式能接受任何类型的参数优势，可以用模版替换。
+
+4.预定义宏
+__LINE__: 当前代码行的行号
+__FILE__:源文件的名字
+__DATE__:以"Mmm dd yyyy"的形式转换日期
+__TIME__:以"hh:mm:ss"的形式转换日期
+__cplusplus:一个包含正式的C++标准的日期
+
+类函数宏:assert，若其参数为0，可把源文件和代码行一块打印出来(__FILE__,__LINE__);
+可用#undef指令去掉宏定义,eg: #undef getc 或者 C = (getc) (stdin);
+将宏用括号括起来，这与宏的定义不相符,因为左边的括号没有紧跟函数名
+
+5.条件编译
+1).当想注释大段代码，#if指令非常方便,因为C风格的注释可能导致外部的注释提前终止.
+#if 0 
+将要忽略的代码放在此处
+#endif
+
+#if指令的目标必须为整型常量,并且符合C的一般规则非0为真，0为假,不可以采用强制类型转换或sizeof运算符。
+
+2).
+#if defined(__cplusplus)
+extern "C"
+{
+#endif
+void f() //告诉c++编译器f()在C环境下被编译
+{
+	std::cout << "f() is a c function!" << std::endl;
+}
+#if defined(__cplusplus)
+}
+#endif
+
+6.预处理运算符
+1).
+#if defined(__MSCVER)
+<把微软标准语句放在此处>
+#elif defined(__BCPLUSPLUS__)
+<将Borland描述的语句放在此处>
+#else
+#error Compiler not supproted. //error指令向stderr打印它的信息并停止编译进程
+#endif
+
+2).要定义DEBUG宏,只需在第一次使用宏之前加入:#define DEBUG
+#if defined(DEBUG)
+fprintf(stderr,"x=%d\n",x);
+#endif
+
+3).等价定义
+#if defined(X) <==> #ifdef X
+#if !defined(X) <==> #ifndef X
+但#if要更灵活,可把多个测试联合起来构成一个表达式
+#if defined(__cplusplus) && !defined(DEBUG)
+
+4)预处理运算符
+# 字符串化
+## 加标记
+Defined 符号表查询
+eg:
+#define trace(x,format) \
+  printf(#x " = %" #format "\n",x)
+main(){
+ int i = 1; float x = 2.0; char *s = "three";
+ trace(i,d); //编译器联结相邻的字符串之后的形式: printf("i=%d\n",i);  
+ trace(x,f);trace(s,s);
+}
+
+加标记##将两个标记联结在一起形成单个的标记
+trace2(1)被翻译成trace(x1,d),这两个运算符周围任何的空格均被忽略
+#include <stdio.h>
+#define trace(x,format)\
+printf(#x " = %" #format "\n",x)
+#define trace2(i) trace(x ## i,d)
+main(){
+  int x1 = 1,x2 = 2,x3 = 3;
+  trace2(1);trace2(2);trace2(3);
+}
+
+
+
