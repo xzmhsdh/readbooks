@@ -1,0 +1,1449 @@
+一、第一章
+1.lz:strlen,strcpy,strcmp,complex,string,vector,深入了解STL，避免一些错误和低效的用法.
+需安装编译STLport和Boost
+2.Boost在VC编译器下支持库自动链接技术(#pragma comment(lib,xxx),但在gcc,xlc下不支持自动
+链接技术。
+3.boost嵌入自己的工程编译:独立于编译器，os和boost库版本，在VC集成环境中使用嵌入工程编译的方式
+需要定义宏BOOST_ALL_NO_LIB或BOOST_XXX_NO_LIB(XXX是某个库的名称)，以指示Boost库不要使用自动链接功能。
+
+三、内存管理
+1.正确地运用delete: 在每个离开作用域的return语句前调用delete,并且使用try
+捕获所有可能发生的异常，然后在catch块中调用delete.
+
+2.scoped_ptr: get()返回内部保存的原始指针,此时原始指针脱离scoped_ptr的控制,不能对其做delete操作,否则
+scoped_ptr析构时会对已经删除的指针再进行删除操作，发生未定义行为.
+
+2.1.eg: scoped_ptr<int> p(new int); //一个int指针的scoped_ptr
+if (p){ *p = 100;} //!p 					//在bool语境中测试指针是否有效
+2.2.scoped_ptr和auto_ptr几乎一样，同样不能用作容器元素，但原因不同,auto_ptr是因为它的转移语义，而scoped_ptr
+是因为不支持拷贝和赋值,不符合容器对元素类型的要求。它们的根本区别在于指针的所有权,auto_ptr指针的所有权可转移，
+可在函数间传递，同一时刻只能有一个auto_ptr管理指针。scoped_ptr把拷贝和赋值函数都声明为私有的，拒绝了指针所有权
+的转让,保证了指针绝对安全。
+
+3.scoped_array:包装了new []操作符 ，一般不推荐使用，而是使用vector
+3.1 eg: scoped_array<int> sa(new int[100]);
+sa[0] = 10;
+*(sa + 1) = 20; //error,can not use as: 数组首地址+N的方式访问数组元素
+3.2 eg: 
+main(){
+int *arr = new int[100];
+scoped_array<int> sa(arr);
+fill_n(&sa[0],100,5);     //使用标准库算法赋值数据
+sa[10] = sa[20] + sa[30]; //use as normal array
+}						  //scoped_array被自动析构，释放动态数组资源
+
+4.shared_ptr:引用计数型智能指针,可被自由拷贝和复制，在任意地方共享，当没有代码使用(引用计数为0)时它才删除被包装的动态分配对象。
+也可安全地放到标准容器中,并弥补了auto_ptr因为转移语义而不能把指针作为STL容器元素的缺陷.
+4.1 shared_ptr的reset()作用:将引用计数减1，停止对指针的共享,除非引用计数为0，否则不会发生删除操作。
+4.2 unique()在shared_ptr是指针的唯一所有者时返回ture,此时其行为类似auto_ptr/scoped_ptr,use_count()返回当前指针的引用计数,
+use_count仅仅用于测试或调试,unique()是可靠的且比use_count() == 1速度快。
+4.3 用于标准关联容器(set和map):
+	typedef shared_ptr<string> sp_t;
+	map<sp_t,int> m;
+	sp_t sp(new string("one"));
+	m[sp] = 111;
+4.4  shared_ptr 不能使用诸如 static_cast<T*>(p.get())的形式, 这将导致转型后的指针无法再被shared_ptr正确管理,而提供了类似的转型函数
+static_pointer_cast<T>(),const_pointer_cast<T>()和dynamic_pointer_cast<T>()它们和标准的转型操作符类似,但返回的是转型后的shared_ptr.
+eg:
+  shared_ptr<std::exception> sp1(new bad_exception("error"));
+  shared_ptr<bad_exception>  sp2 = dynamic_pointer_cast<bad_exception>(sp1);
+  shared_ptr<std::exception> sp3 = static_pointer_cast<std::exception>(sp2);
+  assert(sp3 == sp1);
+4.5 use eg:
+  shared_ptr<int> sp(new int(10));
+  assert(sp.unique());
+  shared_ptr<int> sp2 = sp;
+  assert(sp == sp2 && sp.use_count() == 2);
+  *sp2 = 100;
+  assert(*sp == 100);
+  sp.reset();	//停止shared_ptr的使用
+  assert(!sp);  //sp不再持有任何指针(空指针)
+4.6 use eg2:
+class shared{
+private:
+  shared_ptr<int> p;
+public:
+  shared(shared_ptr<int> p_):p(p_){}
+  void print(){
+	cout << "count:" << p.use_count() << "v=" << *p << endl;
+  }
+};  
+void print_func(shared_ptr<int> p)
+{
+  cout << "count:" << p.use_count() << "v=" << *p << endl;
+}
+int main(){
+  shared_ptr<int> p(new int(100));
+  shared s1(p),s2(p);
+  s1.print();
+  s2.print();
+  *p = 20;
+  print_func(p);
+  s1.print();
+}
+-----
+count:3 v=100
+count:3 v=100
+count:4 v=20
+count:3 v=20
+
+4.7 shared_ptr很好的消除了显式的delete掉用,但构造函数仍然需要new调用，造成new和delete的不对称性
+可使用工厂模式来解决. shared_ptr在头文件<boost/make_shared.hpp>提供了一个自由工厂函数make_shared<T>()来
+消除显式的new调用.make_shared最多可接受10个参数,eg:
+#include <boost/make_shared.hpp>
+int main(){
+  shared_ptr<string> sp = make_shared<string>("make_shared");
+  shared_ptr<vector<int> > spv = make_shared<vector<int> >(10,2);
+  assert(spv->size == 10);
+}
+
+4.8 应用于标准容器
+4.8.1 将容器作为shared_ptr管理的对象,如 shared_ptr<list<T> >
+4.8.2 将shared_ptr作为容器的元素,如 vector<shared_ptr<T> >,因为shared_ptr支持 拷贝语义 和 比较操作,符合标准容器对元素的要求,
+所以可以实现在容器中安全地容纳元素的指针而不是拷贝。存储shared_ptr的容器和存储原始指针的容器功能几乎一样,但shared_ptr为
+程序员做了指针管理工作，可以任意使用shared_ptr而不用担心资源泄漏.
+eg: #include <boost/make_shared.hpp>
+    int main(){
+	  typedef vector<shared_ptr<int> > vs; //一个持有shared_ptr的标准容器类型
+	  vs v(10);							   //声明一个拥有10个元素的容器，元素被初始化为空指针
+	  int i = 0;
+	  for (vs::iterator pos = v.begin(); pos != v.end(); ++pos) {
+	     (*pos) = make_shared<int>(++i);  //使用工厂函数赋值
+		 cout << *(*pos) << ",";
+	  }
+	  cout << endl;
+	  shared_ptr<int> p = v[9];
+	  *p = 100;
+	  cout << *v[9] << endl;
+	
+	}
+4.9应用于桥接模式(pimpl)
+eg:
+  class sample{
+    private:
+	   class impl;		  	//不完整的内部类声明
+	   shared_ptr<impl> p;  //shared_ptr成员变量
+	public:
+	   sample();	
+	   void print();
+  };
+  .cpp
+  class sample::impl		//内部类的实现
+  {
+	public:
+	  void print() { cout << "impl print" << endl;}
+  };
+  sample::sample():p(new impl){}
+  void sample::print(){ p->print();}
+----main.cpp-----
+  sample s;
+  s.print();
+  
+4.10 应用于工厂模式:修改工厂方法接口，不再返回一个原始指针,而是返回一个被shared_ptr包装的智能指针
+eg: class abstract{
+		public:
+		  virtual void f() = 0;
+		  virtual void g() = 0;
+		protected:
+		  virtual ~abstract(){} //除了它自己和它的子类，其他任何对象都无权调用delete来删除它.
+	};
+	class impl:public abstract{
+	   public:
+	     virtual void f() {cout << "class impl f" << endl;}
+		 virtual void g() {cout << "class impl g" << endl;}
+	};
+	shared_ptr<abstract> create(){ return shared_ptr<abstract>(new impl);}
+	int main(){
+		shared_ptr<abstract> p = create();
+		p->f(); 
+		p->g();
+		abstract *q = p.get();
+		delete q;  //error for: protected ~abstract(){}
+		impl *q = (impl*)(p.get());
+		delete q;  //ok,but not recommend to do it.
+	}
+4.11 定制删除器:shared_ptr(Y *p,D d); //Y * can be convert to T *;
+	 D d,删除器参数告知shared_ptr在析构时不使用delete来操作指针p,而用d来操作d(p);
+4.11.1 对删除器的要求:可拷贝,行为同delete,不抛异常
+eg:  class socket_t{...};
+     socket_t* open_socket(){
+		cout << "open socket" << endl;
+		return new socket_t;
+	 }
+	 void close_socket(socket_t *s){
+		cout << "close socket" << endl;
+		//... other op
+	 }
+	使用shared_ptr管理socket资源:
+	socket_t* s = open_socket();
+	shared_ptr<socket_t> p(s,close_socket);  //传入删除器
+eg2:对传统的使用struct FILE的C文件操作
+    shared_ptr<FILE> fp(fopen("./1.txt","r"),fclose);
+	当离开作用域时shared_ptr会自动调用fclose()函数关闭文件
+eg3:高级用法
+    void any_func(void *p) { cout << "some operate" <<endl;}
+	int main() { shared_ptr<void> p((void*)0,any_func); }
+4.12 shared_array: not recommend use,be replace with: shared_ptr<std::vector> / std::vector<shared_ptr>
+
+4.13 weak_ptr: shared_ptr的助手,不具有普通指针的行为,没有重载operator*和->,其最大的作用是协助shared_ptr工作，
+像旁观者那样观测资源的使用情况。
+4.13.1 用法: weak_ptr 可从一个shared_ptr或另一个weak_ptr构造，获得资源的观测权,它没有共享资源,其构造不会引起指针
+引用计数的增加,其析构也不会导致引用计数的减少。use_count()可观测资源的引用计数,expired()功能等价use_count() == 0
+但速度更快，表示被观测的资源(shared_ptr管理的资源)已经不复存在.
+eg: shared_ptr<int> sp(new int(10));
+    assert(sp.use_count() == 1);
+		weak_ptr<int> wp(sp); //从shared_ptr创建weak_ptr
+		assert(wp.use_count() == 1); //weak_ptr不影响引用计数
+		if (!wp.expired())  //判断weak_ptr观察的对象是否失效
+		{
+			 shared_ptr<int> sp2 = wp.lock(); //从被观测的shared_ptr获得一个可用的shared_ptr对象
+			 *sp2 = 100;
+			 assert(wp.use_count() == 2);
+		}
+		assert(wp.use_count() == 1);
+		sp.reset(); //shared_ptr失效
+		assert(wp.expired());
+		assert(!wp.lock()); //weak_ptr将获得一个空指针
+4.13.2 获得this的shared_ptr
+惯用实现:让想被shared_ptr管理的类继承enable_shared_from_this模板类，成员函数shared_from_this()
+会返回this的shared_ptr.eg:
+#include <boost/enable_shared_from_this.hpp>
+#include <boost/make_shared.hpp>
+class self_shared: public enable_shared_from_this<self_shared>
+{
+	public:
+	  self_shared(int n):x(n){}
+		int x;
+		void print(){
+			cout << "self_shared:" << x << endl;
+		}
+};
+int main(){
+	shared_ptr<self_shared> sp = make_shared<self_shared>(123);
+	sp->print();
+	shared_ptr<self_shared> p = sp->shared_from_this();
+	p->x = 100;
+	p->print();
+}
+note:不能从一个普通对象(非shared_ptr)使用shared_from_this()获取shared_ptr.
+self_shared ss;
+shared_ptr<self_shared> p = ss.shared_from_this(); //错误
+
+4.14 boost.pool库: 近似一个小型的垃圾回收机制，在需要大量地分配/释放小对象时很有效率，且完全不需要考虑delete.
+包括4个部分:最简单的pool、分配类实例的object_pool、单件内存池singleton_pool和可用于标准库的pool_alloc。
+其函数都不会抛出异常，如果内存分配失败，将返回0。
+4.14.1 pool类摘要
+		   template <typename UserAllocator= ...>
+			 class pool{
+				 public:
+				   explicit pool(size_type requested_size);
+					 ~pool();
+					 ...
+			 };
+pool的构造函数requested_size指示pool每次分配的内存块大小(而不是pool内存池的大小)
+eg:
+#include <boost/pool/pool.hpp>
+using namespace boost;
+int main(){
+	pool<> pl(sizeof(int));     	//一个可分配int的内存池
+	int *p = (int *)pl.malloc();  //void * 转换为需要的类型
+	if ( p != NULL) {		}
+	assert(pl.is_from(p));        //测试分配的内存块是否是从这个内存池分配出去的
+	pl.free(p);								    //释放内存池分配的内存块
+	for (int i = 0; i < 100; ++i) //连续分配大量的内存100 * 10 = 1000个int内存
+	{
+		pl.ordered_malloc(10);	    //连续分配10块内存
+	}
+}															  //内存池对象析构,所有分配的内存在这里被释放
+note:它只能作为普通数据类型int,double等的内存池, 只分配内存，不调用构造函数。
+
+4.14.2 object_pool: 用于类实例(对象)的内存池,功能与pool类似，但会在析构时对所有已经分配的内存块调用析构函数，从而
+正确地释放资源。类摘要
+template <typename ElementType>
+class object_pool: protected pool{
+public:
+   object_pool();
+	 ~object_pool();
+	 element_type *malloc();
+	 void free(element_type *p);
+	 bool is_from(element_type *p) const;
+	 element_type *construct(...);
+	 void destroy(element_type *p);
+};
+object_pool保护继承pool不能使用pool的接口,ElementType指定了要分配的元素类型,其析构函数不能抛出异常，指定了类型,
+object_pool实例就不能再用于分配其他类型的对象。
+4.14.3 用法:object_pool即可以像pool那样分配原始内存块, 也可以使用construct()来直接在内存池中创建对象。
+eg: #include <boost/pool/object_pool.hpp>
+    using namespace boost;
+		struct demo_class{
+			public:
+			 int a,b,c;
+			 demo_class(int x = 1,int y = 2, int z = 3):a(x),b(y),c(z){}
+		};
+		int main(){
+			object_pool<demo_class> pl;  //对象内存池
+			demo_class *p = pl.malloc(); //分配一个原始内存块
+			assert(pl.is_from(p));
+			//p指向的是未经过初始化的内存
+			assert(p->a != || p->b != 2 || p->c != 3);
+			
+			p = pl.construct(7,8,9);     //构造一个对象，可传递参数
+			assert(p->a == 7);
+			object_pool<string> pls;
+			for(int i = 0; i < 10; ++i)
+			{
+				string *ps = pls.construct("hello object_pool");
+				cout << *ps << endl;
+			}
+		} //所有创建的对象都在这里被正确析构、释放内存。
+  4.15 signleton_pool: 与pool 的接口完全一样只是都是静态成员函数,也是分配简单数据类型内存，线程安全,在main()运行之前创建。
+	类摘要:
+	template <typename Tag,unsigned RequestedSize>
+	class signleton_pool{...};
+	模板类型参数:Tag仅仅是用于标记不同的单件，可以是空类或声明,RequestedSize等同于pool的requested_size。
+  eg: #include <boost/pool/signleton_pool.hpp>
+	    using namespace boost;
+			struct pool_tag{};
+			typedef signleton_pool<pool_tag,sizeof(int)> spl;
+			int main()
+			{
+				int *p = (int *)spl::malloc();
+				assert(spl::is_from(p));
+				spl::release_memory(); //释放所有未被分配的内存
+			}//sp1的内存直到程序结束才完全释放，而不是退出作用域
+4.16 pool_alloc: 提供了2个可用于标准容器模板参数的内存分配器pool_alloc和fast_pool_allocator，内存分配失败时
+会抛出std::bad_alloc异常，除非有特别的需求，否则总是应该使用STL实现自带的内存分配器。
+eg: #include <boost/pool/pool_alloc.hpp>
+    using namespace boost;
+		int main(){
+			vector<int, pool_allocator<int> > v; //使用pool_allocator代替标准容器默认的内存分配器,vector将使用新的分配器良好工作
+			v.push_back(10);
+			cout << v.size();
+		}
+ 
+五、实用工具
+5.1 noncopyable:允许程序轻松地实现一个禁止复制的类
+    头文件:boost/noncopyable.hpp / boost/utility.hpp
+		用法:  #include <boost/utility.hpp>
+		       class do_not_copy: (private/public) boost::noncopyable 
+				 	 {...};
+
+5.2 typeof库对应功能为C++11的 typeof 和 auto 关键字,可让C++编译器在编译时自动推导表达式的类型。
+对应的两个宏: BOOST_TYPEOF、BOOST_AUTO
+eg:  #include <boost/typeof/typeof.hpp>
+     vector<string> func()
+		 {
+			  vector<string> v(10);
+				return v;
+		 }
+		 int main(){
+			 BOOST_TYPEOF(2.0*3) x = 2.0 * 3; //推导类型为double
+			 BOOST_AUTO(y,2+3);							  //推导类型为int
+			 BOOST_AUTO(&a,new double[20]);	  /double*的引用
+			 BOOST_AUTO(p,make_pair(1,"string")); //pair<int,const char*>
+			 BOOST_AUTO(v,func());			       //vector<string>
+		 }
+5.2.1 向typeof库注册自定义类:typeof支持C++内置的基本类型和STL中的大多数类型。
+eg: #include <boost/typeof/typeof.hpp>
+	  #include BOOST_TYPEOF_INCREMENT_REGISTARTION_GROUP()  //注册开始语句
+		namespace ex{
+			struct demo_class{int a,b;};
+		}
+		BOOST_TYPEOF_REGISTER_TYPE(ex::demo_class) //在全局名字空间，向typeof库注册类
+		int main(){
+			BOOST_AUTO(x,make_pair("test",ex::demo_class())); 
+			cout << typeid(x).name() << endl;
+			x.second.a = 10;
+			x.second.b = 20;
+		}
+note: #define auto_t BOOST_AUTO
+      auto_t(p, make_shared<int>(10));
+			assert(*p == 10);
+
+5.3 optional: 很像一个仅能存放一个元素的容器，它实现了"未初始化"的概念:如果元素未初始化，它就是一个空的容器，否则就是一个
+有效的，已经初始化的值
+eg: #include <boost/optional.hpp>
+    using namespace boost;
+		int main(){
+			optional<int>  op0;	//一个未初始化的optional对象
+			optional<int>  op1(none); //同上,使用none赋予未初始化值
+			assert(!op0);
+			assert(op0 == op1);
+			assert(op1.get_value_or(253) == 253);
+			optional<string> ops("test");
+			cout << *opos << endl;
+			vector<int> v(10);
+			optional<vector<int>& > opv(v); //容纳一个容器的引用
+			assert(opv);
+			opv->push_back(5);
+			assert(opv->size() == 11);
+			opv = none;					//置为未初始化状态
+			assert(!opv);
+		}
+5.3.1 工厂函数:make_optional(),不能推导出 T 引用类型的 optional 对象，optional<T&>对象不能用make_optional()创建
+eg: int main(){
+	  BOOST_AUTO(x,make_optional(5));
+		assert(*x == 5);
+		BOOST_AUTO(y,make_optional<double>((*x > 10),1.0));
+		assert(!y);
+  }
+5.3.2 optional<T>要求类型T具有拷贝语义, 因为它会保存值的拷贝，对复杂对象的拷贝代价很高时而其值仅作为临时用途时，可用
+就地创建:其不要求类型具有拷贝语义，直接用构造函数所需的参数创建对象。
+eg: #include <boost/optional.hpp>
+    #include <boost/utility/in_place_factory.hpp>
+		int main(){
+			optional<string> ops(in_place("test in_place_factory")); //就地创建string对象而不需要临时对象string("...")
+		  optional<vector<int> > opp<in_place(10,3)); // 不需要临时对象vector(10,3)
+			assert(opp->size() == 10);
+			assert((*opp)[0] == 3);
+	 	}
+
+5.4 assign: 对STL容器赋值或初始化
+eg: #include <boost/assign.hpp>
+	  int main(){
+			using namespace boost::assign; //很重要，启用assign库的功能:让重载的+= , 等操作符在作用域内生效
+			vector<int> v;
+			v += 1,3,4,5,6*6;
+			set<string> s;
+			s += "cpp","java","C#","python";
+			map<int,string> m;
+			m += make_pair(1,"one"),make_pair(2,"two"); //使用pair无效
+		}
+5.4.1 insert()、push_front()、push_back()可作用于拥有同名成员函数的容器
+eg:  #include <boost/assign.hpp>
+	  int main(){
+			using namespace boost::assign;
+			vector<int> v;
+			push_back(v)(1)(2)(3)(4)(5); // push_back(v),1,2,3,4,5;
+		  list<string> l;
+			push_front(l)("cpp")("java");
+			set<double> s;
+			insert(s)(3.4)(0.16);
+			map<int,string> m;
+			insert(m)(1,"one")(2,"two");
+		}
+5.4.2 +=、()解决了对容器赋值问题，在容器构造时完成数据的填充:list_of()、map_list_of()/pair_list_of()和tuple_list_of()
+list_of():用法和insert()、push_back()等类似，也重载了()和,操作符，返回一个匿名的列表可赋值给任意容器。
+eg: #include <boost/assign.hpp>
+    int main(){
+			using namespace boost::assign;
+			vector<int> v = list_of(1)(2)(3)(4); // v = [1,2,3,4]
+			deque<string> d = (list_of("power")("bomb"),"phazon","suit"); // d = [power bomb phazon suit];
+			set<int> s = (list_of(10),20,30,40); // s = [10 20 30 40];
+			map<int,string> m = list_of(make_pair(1,"one"))(make_pair(2,"two")); // m = [(1,"one")(2,"two")]
+		}
+map_list_of()/pair_list_of(): almost same
+eg: #include <boost/assign.hpp>
+    int main(){
+			using namespace boost::assign;
+			map<int,int> m1 = map_list_of(1,2)(3,4)(5,6); // m1 = [(1,2)(3,4)(5,6)]
+		  map<int,string> m2 = map_list_of(1,"one")(2,"two"); //m2 = [(1,"one")(2,"two")]
+		}
+tuple_list_of():用于初始化元素类型为tuple的容器,tuple是Boost引入的一种新的容器/数据结构
+
+5.4.3 repeat(size_n,value)、repeat_fun(size_n,fun)、range(Iterator_first,Iterator_end)
+eg: #include <boost/assign.hpp>
+    #include <cstdlib>
+	  int main(){
+			using namespace boost::assign;
+			vector<int> v = list_of(1).repeat(3,2)(3)(4)(5); // v = 1,2,2,2,3,4,5
+			multiset<int> ms;
+			insert(ms).repeat_fun(5,&rand).repeat(2,1),10; ms = x,x,x,x,x,1,1,10
+			deque<int> d;
+			push_front(d).range(v.begin(),v.begin() + 5); // d = 3,2,2,2,1 队列
+		}
+5.4.4 list_of() 的嵌套使用:可就地创建匿名列表
+eg: 
+using namespace boost::assign;
+vector< vector<int> > v = list_of(list_of(1)(2))(list_of(3)(4));
+v += list_of(5)(6),list_of(7)(8);
+
+5.5 boost::swap: 交换两个变量(int,double等内置数据类型，或者类实例，容器)的值
+std::swap(): template<typename T>
+						 void swap(T &a, T &b)
+						 {
+							 T tmp(a);
+							 a = b;
+							 b = tmp;
+						 }
+						 note:要求交换的对象必须时可拷贝构造和可拷贝赋值的,效率较低(一次拷贝构造和两次赋值操作)
+boost::swap工作原理:查找有无针对类型T的std::swap()的特化swap()或者通过ADL查找模版特化的swap()，如果有则调用,
+没有则退化为std::swap()。
+5.5.1 交换数组:数组长度必须相同
+eg: int  a1[10];
+	  int  a2[10]; 
+		std::fill_n(a1,10,5);
+		std::fill_n(a2,10,20);
+		boost::swap(a1,a2);
+5.5.2 特化std::swap
+eg: class point{
+			int x,y,z;
+			public:
+			  explicit point(int a=0,int b=0,int c=0):x(a),y(b),z(c){}
+				void print()const {cout << x << ","<<y<<","<<z<< endl;}
+				void swap(point &p){
+					std::swap(x,p.x);
+					std::swap(y,p.y);
+					std::swap(z,p.z);
+					cout << "inner swap" << endl;
+				}
+	  };
+		namespace std{ //特化std::swap()
+		 		template<> 
+				void swap(point &x,point &y){x.swap(y);}
+		}
+		int main(){
+			point a(1,2,3),b(4,5,6);
+			cout << "std::swap" << endl;
+			std::swap(a,b); //调用std::swap
+			cout << "boost::swap" << endl;
+			boost::swap(a,b); //调用boost::swap
+		}
+		-----------
+		std::swap
+		inner swap
+		boost::swap
+		inner swap
+		note:由于在名字空间特化了std::swap,因此boost::swap和std::swap效果相同,都使用了特化后的swap函数
+5.5.3 特化 ADL 可找到的swap
+eg: //gloabl namespace
+    void swap(point &x,point &y){ x.swap(y); }
+		int main(){
+		  //...
+		}
+		-------
+		std::swap
+		boost::swap  //通过ADL规则找到了全局名字空间的特化交换函数
+		inner swap
+
+5.6 singleton: 对类型 T 的要求是有无参构造函数，在构造和析构时不能抛出异常
+5.6.1 singleton在boost.pool中的实现: singleton_default 位于名字空间boost::details::poool
+eg1: #include <boost/pool/detail/singleton.hpp>
+		using boost::details::pool::singleton_default;
+		int main(){
+	  	typedef singleton_default<point> origin; //定义单件类
+			origin::instance().print();   //使用instance()获得单件对象
+	  }
+eg2: class SqlDB_t{
+			 public:
+			   void connect() { cout << "connect db" << endl; }
+				 void exec(const char *sqlstr) { cout << "exec insert/update/delete:" << sqlstr << endl;}
+				 void query(const char *sqlstr) {cout << "exec select " << sqlstr << endl;}
+		 };
+		 typedef singleton_default<SqlDB_t> SqlDB;
+		 int main(){
+			 cout << "main() start" << endl;
+			 SqlDB::instance().connect();
+			 SqlDB::instance().exec("create table...");
+			 SqlDB::instance().query("select * from goods");
+		 }
+5.6.2  singleton在boost.serialzation中的实现
+#include <boost/serialzation/singleton.hpp>
+using boost::serialzation::singleton;
+template<typename T>
+class singleton: public boost::noncopyable{
+	public:
+	  static const T & get_const_instance(); //常对象单件总是线程安全的
+		static T & get_mutable_instance(); //非线程安全
+};
+eg: #include <boost/serialzation/singleton.hpp>
+		using boost::serialzation::singleton;		
+    int main(){
+			 typedef singleton<point> origin;
+			 origin::get_const_instance().print();
+			 origin::get_mutable_instance().print();
+		}
+eg2:通过继承方式使用
+    class point:public singleton<point>{...};
+		int main(){
+			 point::get_const_instance().print(); //point继承了singleton的所有能力包括不可拷贝和单件。
+			 point::get_mutable_instance().print();
+		}
+5.7 tribool: 三态布尔逻辑:true,false,indeterminate
+
+5.8 operators
+5.8.1 C++98的std::rel_ops提供了四个模版比较操作符!=、>、<=、>=,只需为类定义==和<操作符，4个操作符就可以自动实现
+eg: #include <utility>
+    class demo_class{
+			public:
+			  demo_class(int n):x(n){}
+				int x;
+				friend bool operator<(const demo_class& l,const demo_class& r){
+					 return l.x < r.x;
+				}
+		};
+		int main(){
+			demo_class a(10),b(20);
+			using namespace	std::rel_ops; //must have
+			cout << (a < b) << endl;
+			cout << (b >= a) << endl; // >=等操作被自动实现
+		}
+5.8.2 还有很多其他操作符重载标准库没有给出解决方案，operators给出了。
+equality_comparable   == --> != | less_than_comparable  <  --> >、<=、>=
+addable								+= -->  + | substractable         -= --> -
+incrementable				  ++ --> v++| decrementable				  -- --> v--
+equivalent						<  --> ==
+note: operators库里的内都是空类，没有成员函数和成员变量，仅定义几个友元操作函数
+eg1: template<class T>
+    struct less_than_comparable{
+				friend bool operate>(const T& x,const T& y);
+				friend bool operate<=(const T& x,const T& y);
+				friend bool operate>=(const T& x,const T& y);
+		};
+eg2: #include <boost/operators.hpp>
+     class point: boost::less_than_comparable<point>{
+			 public:
+			   friend bool operate<(const point& l,const point& r){
+					 return (l.x*l.x + l.y*l.y + l.z*l.z) < (r.x*r.x + r.y*r.y + r.z*r.z);
+				 }
+		 };
+		 int main(){
+			 point p0,p1(1,2,3),p2(3,0,5),p3(3,2,1);
+			 assert(p0 < p1 && p1 < p2);
+			 assert(p2 > p0);
+			 assert(p1 <= p3);;
+			 assert(!(p1 < p3) && !(p1>p3));
+		 }
+		 note: less_than_comparable生成的代码可理解为:
+		 struct less_than_comparable{
+			 friend bool operator>=(const point& x,const point& y){ return !(x < y); }
+		 }
+eg3: 定义相等关系,需自行实现operator==
+     class point:boost::less_than_comparable<point>,boost::equality_comparable<point>{
+			 public:
+			   friend bool operator<(const point& l,const point& r){ /*same as before*/}
+				 friend bool operator==(const point& l,const point& r){ return r.x == l.x && r.y == l.y && r.z == l.z; }
+		 };
+		 assert(p1 == p2);
+		 assert(p1 != p3);
+		 note: 模版参数类型必须时子类自身，若子类自身也是模版类时:
+		 template<typename T> class point:boost::less_than_comparable<T>     //错误
+		 template<typename T> class point:boost::less_than_comparable<point> //错误
+		 template<typename T> class point:boost::less_than_comparable< point<T> > //point<T>才是模版类point的全名
+5.8.3 基类链: 通过模版把多继承转换为链式的单继承
+eg: class point: less_than_comparable<point,
+                 equality_comparable<point,
+								 addable<point,
+								 substractable<point,
+								 > > > >{...};
+5.8.4 相等和等价: 相等基于操作符==即x==y,等价基于<即 !(x<y) && !(x>y)
+
+5.9 exception 库
+5.9.1 标准库中的异常std::exception:try/catch/throw异常处理机制,std::exception派生若干子类,bad_alloc,bast_cast,
+out_of_range等描述不同种类的异常,可被继承以添加更多的异常诊断信息。
+eg: class my_exception: public std::exception{   //继承标准库异常类
+      private:
+			 int err_no;
+			public: 
+			 my_exception(const char* msg,int err):
+			   std::exception(msg),err_no(err){}
+			int get_err_no() {return err_no;}
+     };
+     note:当需要很多不同种类的异常时很繁琐，需要boost.exception来完善。
+5.9.2 exception库提供2个类: exception、error_info
+exception类摘要:
+class exception{
+protected: //抽象类，除了它的子类，任何人都不能创建或者销毁它
+  exception();
+	exception(exception const & x);
+	~exception();
+	template <class E,class Tag,class T>
+private:
+  friend E const & operator<<(E const&, error_info<Tag,T> const &); //存储error_info对象的信息
+};
+template <class ErrorInfo,class E>
+  typename ErrorInfo::error_info::value_type* get_error_info(E &x); //自由函数，取出存储的error_info对象的信息，无返回空指针
+
+error_info类摘要:
+template <class Tag,class T>  //Tag标记，最好是一个空类
+class error_info{
+public:
+  typedef T value_type;
+	error_info(value_type const &v);
+	value_type & value();
+};
+
+自定义异常类：必须使用虚继承的方式，继承完成后自定义异常类的实现也结束了
+struct my_exception: virtual std::exception,virtual boost::exception //虚继承
+{  }; //空实现，不需要实现代码
+note:发生异常时，创建一个自定义异常类，并用<<操作符向它存储任意信息,用get_error_info()函数提取
+eg:
+#include <boost/exception/all.hpp>
+typedef boost::error_info<struct tag_err_no, int> err_no;
+typedef boost::error_info<struct tag_err_str, string> err_str;
+int main()
+try{																//function-try块
+		using namespace boost;
+		try{
+			//抛出异常，存储错误码
+			throw my_exception() << err_no(10);
+		}
+		catch(my_exception& e)
+		{
+			 //获得异常内存储的信息
+			 cout << *get_error_info<err_no>(e) << endl;
+			 cout << e.what() << endl;
+			 e << err_str("other info");   //向异常追加信息
+			 throw;												 //再次抛出异常
+		}
+}
+catch(my_exception& e)							 // function-try的捕获代码
+{
+	 cout << *get_error_info<err_str>(e) << endl;
+}
+note: exception库特意提供若干预先定义好的错误信息类
+try{
+	throw my_exception() << errinfo_api_function("call api") << errinfo_errno(101);
+}
+catch (boost::exception& e)
+{
+	cout << *get_error_info<errinfo_api_function>(e);
+	cout << *get_error_info<errinfo_errno>(e);
+}
+可获得函数名，源文件名和源代码行号:
+typedef error_info<struct throw_function_,char const *> throw_function;  //BOOST_CURRENT_FUNCTION
+typedef error_info<struct throw_file_,char const *> throw_file;	//__FILE__
+typedef error_info<struct throw_line_,int> throw_line; //__LINE__
+使用宏快捷定义:
+#define DEFINE_ERROR_INFO(type,name) \
+  typedef boost::error_info<struct tag_##name,type> name; //typedef boost::error_info<struct tag_##__FILE__##__LINE__##name,type> name; 
+DEFINE_ERROR_INFO(int,err_no); <==> typedef boost::error_info<struct tag_err_no,int> err_no;
+5.9.3 包装标准异常/自定义类型: enable_error_info()通常用在已经存在异常类的场合,对异常类的修改很困难甚至不可能（已编译成库）
+eg1: #include <boost/exception/all.hpp>
+    struct my_err{}; //某个自定义的异常类，未使用boost::exception
+		int main(){
+			using namespace boost;
+			try{
+				throw enable_error_info(my_err()) << errinfo_errno(10); //enable_error_info()返回的对象是boost::exception和my_err的子类，catch的参数可以是两者中的任意一个
+			}
+			catch(boost::exception& e)  //如果要使用boost::exception所存储的信息，就必须用boost::exception来捕获异常
+			{
+				cout << *get_error_info<errinfo_errno>(e) << endl;
+			}
+		}
+eg2:包装标准异常
+throw enable_error_info(std::runtime_error("runtime")) << errinfo_at_line(__LINE__);
+note:可使用throw_exception()函数来简化enable_error_info()的调用并替代原始的throw语句来抛出异常,会自动使用enable_error_info()来包装异常对象，且支持线程安全
+<===> throw (boost::enable_error_info(e));
+throw_exception(std::runtime_error("runtime"));
+5.9.4 exception提供了方便的存储信息的能力，可向其添加任意数量的信息。当异常对象被用operator<<多次追加数据后会导致有大量的存储信息。
+用自由函数get_error_info()来逐项检索很麻烦,diagnostic_information()
+eg: #include <boost/exception/all.hpp>
+    using namespace boost;
+		struct my_err{};
+		int main(){
+			using namespace boost;
+			try{
+				throw enable_error_info(my_err()) << errinfo_errno(101) << errinfo_api_function("fopen");
+			}
+			catch(boost::exception& e){
+				cout << diagnostic_information(e) << endl;
+			}
+			try{
+				 BOOST_THROW_EXCEPTION(std::logic_error("logic")); //必须是标准异常
+			}
+			catch(boost::exception& e){
+				cout << diagnostic_information(e) << endl;
+			}
+		}
+5.9.5 异常类型转换: current_exception_cast<E>(),只能在catch块内部使用,可把异常对象转型为指向E类型的指针，如果异常对象无法转换为E*则返回空指针。
+eg: 把boost::exception转型成std::exception,前提是异常必须是std::exception的子类。
+catch(boost::exception &){
+	cout << current_exception_cast<std::exception>()->what();
+}
+5.9.6 线程间传递异常:需要boost::exception的clone能力，使用enable_current_exception()包装异常对象或者使用throw_exception()都能包装异常对象使其可被clone。
+当发生异常时,线程需在catch块调用current_exception()得到当前异常对象的指针exception_ptrd对象，它指向异常对象的拷贝,是线程安全的。
+eg:
+void thread_work(){
+	throw_exception(std::exception("test"));
+}
+int main(){
+	using namespace boost;
+	try{
+		thread_work(); //启动一个线程，可能抛出异常 
+	}catch(...){
+		exception_ptr e = current_exception();
+		cout << current_exception_diagnostic_information();
+	}
+}
+
+5.10 uuid 长度:(128 = 16 * 8）
+
+第5章 字符串与文本处理
+string_algo提供了大量常用的字符串处理函数90%需求，剩余的10%:tokenizer(分词器),xpressive(正则表达式分析器)。
+5.1 lexical_cast: 字符串、整数/浮点数之间的字面转换
+eg: #include <boost/lexical_cast.hpp>
+    int main(){
+			using namespace boost;
+			int 	   x = lexical_cast<int>("100");
+			long     y = lexical_cast<long>("2000");
+			float    pi= lexical_cast<float>("3.14159e5"); //e/E除外，123L,0x00不可以
+		  double    e= lexical_cast<double>("2.718");
+			string str = lexical_cast<string>(245);
+			try{
+			  cout << lexical_cast<string>(0.618) << endl;
+			  cout << lexical_cast<string>(0x10) << endl;
+			}catch(bad_lexical_cast& e){
+				cout << "error:" << e.what() << endl;
+			}
+		}
+eg: bad_lexical_cast用作验证用户输入有效性
+template<typename T>  //模板函数
+bool num_valid(const char *str)
+try{								  //function-try块
+	 lexical_cast<T>(str);
+	 return true;
+}catch(bad_lexical_cast &){
+	return false;
+};
+int main(){
+	assert(num_valid<double>("3.14"));
+	assert(!num_valid<int>("3.14"));
+	assert(num_valid<int>("65535"));
+}
+5.2 lexical_cast: 内建类型(int,double等)和std::string,对于STL中的容器和其他用户自定义类不能使用。
+若实在需要用于自定义的类，需满足lexical_cast的要求:实现operator<<
+eg: class demo_class{
+			friend std::ostream& operator<<(std::ostream& os,const demo_class& x){
+				os << "demo_class's Name";
+				return os;
+			}
+		};
+		int main(){
+			cout << lexical_cast<string>(demo_class()) << endl;
+		}
+note:可将demo_cass提取为一个模板:
+		template <typename T>
+		struct outable{
+			friend std::ostream& operator<<(std::ostream& os,const T& x){
+				 os << typeid(T).name();
+				 return os;
+			}
+		}
+		简化eg:
+		class demo_class: outable<demo_class>{};
+		int main(){
+			cout << lexical_cast<string>(demo_class()) << endl;
+		}
+
+5.3 format: printf()不做类型检查直接stdout输出,format做了很多安全检查，比printf()慢2~5倍
+eg: #include <boost/format.hpp>
+    using namespace boost;
+		int main(){
+			cout << format("%s:%d+%d=%d\n") % "sum" % 1 % 2 % (1+2);
+			format fmt("(%1% + %2%) * %2% = %3%\n");
+			fmt % 2 % 5;
+			fmt % ((2+5)*5);
+			cout << fmt.str();
+		}
+		--------
+		sum:1+2=3
+		(2 + 5) * 5 = 35
+eg: format fmt("%05d\n%-8.3f\n% 10s\n%05X\n");
+    cout << fmt %62 %2.236 % "123456789" % 48;
+		------
+		00062
+		2.236
+		 123456789
+		00030
+note:在意format的性能问题:先建立 const format对象，然后拷贝这个对象进行格式化操作。
+const format fmt("%10d %020.8f");
+cout << format(fmt) %62 % 2.235;
+
+5.4 string_algo:大小写无关比较、修剪、特定模式的子串查找
+eg: #include <boost/algorithm/string.hpp>
+    using namespace boost;
+		int main(){
+			string str("readme.txt");
+			if (ends_with(str,"txt")){											  //判断后缀
+				 cout << to_upper_copy(str) + " UPPER" << endl; //大写
+				 assert(ends_with(str,"txt"));
+			}
+			replace_first(str,"readme","followme"); //替换
+			cout << str << endl;
+			vector<char> v(str.begin(),str.end());
+			vector<char> v2 = to_upper_copy(erase_first_copy(v,"txt)); //删除字符串
+			for (int i = 0; i < v2.size(); ++i){
+				 cout << v2[i];
+			}
+		}
+		-----
+		README.TEXT UPPER
+		followme.txt
+		FOLLOWME.
+5.5 string_algo 算法:命名含义: 前缀i，表明算法时大小写敏感。后缀_copy表明算法不变动输入，返回处理结果的拷贝。后缀_if
+表明算法需要一个作为判断式的谓词函数对象，否则使用默认的判断准则。
+string_algo提供的算法: 大小写转换、判断式与分类、修剪、查找和替换、分割和合并。
+eg1: #include <boost/algorithm/string.hpp>
+     using namespace boost;
+	 int main(){
+		 string str("I Don't Know.\n");
+		 cout << to_upper_copy(str); //返回大写的拷贝
+		 cout << str;				 //原字符串不改变
+		 to_lower(str);				 //字符串小写
+		 cout << str;				 //原字符串被改变
+	 }
+5.5.1 判断式(算法):starts_with,ends_with,contains,equals,lexicographical_compare(根据字典顺序判断一个字符串是否小于另一个),all(
+	  检查一个字符串中的所有元素是否满足指定的判断式)。除了all其他都有i版本但没有copy版本
+eg2: #include <boost/algorithm/string.hpp>
+     using namespace boost;
+	 int main(){
+		 string str("Power Bomb");
+		 assert(iends_with(str,"bomb")); //大小写无关检查
+		 assert(!ends_with(str,"bomb"));
+		 assert(contains(str,"er"));	 //测试包含关系
+		 string str2 = to_lower_copy(str);
+		 assert(iequals(str,str2));
+		 assert(all(str2.substr(0,5),is_lower()));
+	 }
+5.5.2 判断式(函数对象)
+     is_equal:判断2个对象是否相等。
+	 is_less :比较2个对象是否具有小于关系。
+	 is_not_greater:比较2个对象是否有不大于关系。
+	 #include <boost/algorithm/string.hpp>
+	using namespace boost;
+	int main(){
+		string str1("Samus"),str2("samus");
+		assert(!is_equal()(str1,str2)); //第一个括号调用了函数对象的构造函数产生一个临时对象，第二个括号operator()
+		assert(is_less()(str1,str2));
+	}
+5.6 分类
+is_space,is_alnum,is_cntrl,is_digit,is_graph,is_lower,is_print,is_punct,is_upper,is_xdigit,is_any_of,if_from_range
+5.7 修剪 
+trim_left,trim_right,trim以及_if和_copy两种后缀
+eg: #include <boost/format.hpp>
+    #include <boost/algorithm/string.hpp>
+	using namespace boost;
+	int main(){
+		format fmt("|%s|\n");
+		string str = "  samus aran   ";
+		cout << fmt % trim_copy(str); ///删除2端的空格
+		cout << fmt % trim_left_copy(str); //删除左端空格
+		trim_right(str); //原地删除右端空格
+		string str2 = "2018 Happy new Year!!!";
+		cout << fmt % trim_left_copy_if(str2,is_digit())); //删除左端的数字
+		cout << fmt % trim_right_copy_if(str2,is_punct()));//删除右端的标点
+		cout << fmt % trim_copy_if(str2,is_punct() || is_digit() || is_space()); //删除两端的标点、数字和空格
+	}
+
+5.8 查找:与std::search()类似，但接口不一样,它不是返回一个迭代器(查找到的位置),而使用了boost.range库的iterator_range
+返回查找到的整个区间。
+find_first、find_last、find_nth(查找字符串在输入中的第n次(从0开始计数)出现的位置),有i前缀版本
+find_head <==> substr(0,n)取一个字符串开头N个字符的字串,find_tail取一个字符串末尾N个字符的字串。
+eg:#include <boost/format.hpp>
+   #include <boost/algorithm/string.hpp>
+   using namespace boost;
+   int main(){
+	   format fmt("|%s|. pos = %d\n");
+	   string str = "Long Long ago,there was a king.";
+	   iterator_range<string::iterator> rge;
+	   rge = find_first(str,"long");
+	   cout << fmt % rge % (rge.begin() - str.begin());
+	   rge = find_nth(str,"ng",2); //找第三次出现
+	   cout << fmt % rge % (rge.begin() - str.begin());
+	   rge = find_head(str,4);  //取前4个字符
+	   cout << fmt % rge % (rge.begin() - str.begin());
+	   assert(!rge.empty());
+   }
+5.9 替换与删除
+replace/erase_first、replace/erase_last、replace/erase_nth、replace/erase_all、replace/erase_all、replace/erase_head
+、replace_tail。
+eg: #include <boost/algorithm/string.hpp>
+    using namespace boost;
+	int main(){
+		string str = "Samus beat the monster.\n";
+		cout << replace_first_copy(str,"Samus","samus");
+		replace_last(str,"beat","kill");
+		replace_tail(str,9,"ridley.\n");
+		cout << ierase_all_copy(str,"samus");
+		cout << replace_nth_copy(str,"1",1,"L");
+	}
+5.10 分割: find_all 和 split
+eg: #include <boost/algorithm/string.hpp>
+    using namespace boost;
+	int main(){
+		string str = "Samus,Link.Zelda::Mario-Luigi+zelda";
+		deque<string> d;
+		ifind_all(d,str,"zELDA");
+		assert(d.size() == 2);
+		for (BOOST_AUTO(pos,d.begin()); pos != d.end(); ++pos){
+			cout << "[" << *pos << "]";
+		}
+		cout << endl;
+		list<iterator_range<string::iterator> > l;
+		split(l,str,is_any_of(",.:-+"));
+		for (BOOST_AUTO(pos,l.begin()),pos != l.end(); ++pos){
+			cout << "[" << *pos << "]";
+		}
+		cout << endl;
+		l.clear();
+		split(l,str,is_any_of(".:-"),token_compress_on);
+		for (BOOST_AUTO(pos,l.begin()); pos != l.end(); ++pos){
+			cout << "[" << *pos << "]";
+		}
+	}
+------------------
+[Zelda] [zelda]
+[Samus] [Link] [Zelda] [] [Mario] [Luigi] [zelda]
+[Samus,Link] [Zelda] [Mario] [Luigi+zelda]
+
+5.11 合并:joint是分割算法的逆运算，把存储在容器中的字符串连接成一个新字符串，并可以指定连接的分隔符。
+eg: #include <boost/assign.hpp>
+    #include <boost/algorithm/string.hpp>
+	using namespace boost;
+	int main(){
+		using namespace boost::assign;
+		vector<string> v = list_of("Samus")("Link")("Zelda")("Mario"); //使用assign库向vecotr添加4个字符串
+		cout << join(v,"+") << endl;  //"+"合并
+		struct is_contains_a{ //定义一个简单的函数对象
+			bool operator()(const string &x){
+				return contains(x,"a");
+			}
+		};	
+		cout << join_if(v,"**",is_contains_a()); //合并,判断字符串是否包含字符a
+	}
+------------
+Samus+Link+Zelda+Mario
+Samus**Zelda**Mario
+
+5.12 查找/分割 迭代器: find_iterator,split_iterator
+eg:#include <boost/algorithm/string.hpp>
+   using namespace boost;
+   int main(){
+	   string str("Samus||samus||mario||||Link");
+	   typedef find_iterator<string::iterator> string_find_iterator; //查找迭代器类型定义
+	   string_find_iterator pos,end;
+	   for(pos = make_find_iterator(str,first_finder("samus",is_iequal()));
+	       pos != end; ++pos)	{ cout << "[" << *pos << "]"; }
+	   typedef split_iterator<string::iterator> string_split_iterator; //分割迭代器定义
+	   string_split_iterator p,endp;
+	   for (p = make_split_iterator(str,first_finder("||",is_iequal()));
+	        p != endp; ++p) {cout << "[" << *p << "]"; }
+   }
+5.13 tokenizer：使用简单易用的方法把一个字符串分解成若干个单词
+由于tokenizer具有类似容器的接口，所以可以使用BOOST_AUTO。
+eg:#include <boost/tokenizer.hpp>
+   using namespace boost;
+   int main(){
+	   string str("Link raise the master-sword.");
+	   tokenizer<> tok(str); //使用缺省模板参数创建分词对象
+	   for(BOOST_AUTO(pos,tok.begin()); pos != tok.end(); ++pos)
+	   {  cout << "[" << *pos << "]"; }
+   }
+--------------
+[Link][raise][the][master][sword]
+note:tokenizer默认把所有的空格和标点符号作为分隔符,因此分割出的只是单词。
+
+5.14 tokenizer库提供预定义好的3个分词对象: char_separator(一个字符集合作为分割符)
+,escaped_list_separator(用于CSV格式，逗号分隔),offset_separator(偏移量)。
+5.14.1:char_separator(const char* dropped_delims,const char* kept_delims=0,
+empty_token_policy empty_tokens=drop_empty_tokens);
+第一个参数：分隔符集合，其字符不会作为分词的结果出现。
+第二个参数: 也是分割集合，其字符会保留在分词结果中。
+第三个参数: 处理2个连续出现的分隔符,如为keep_empty_tokens表示连续出现的分隔符标识了一个空字符串。
+template<typename T>
+void print(T &tok){
+	for(BOOST_AUTO(pos,tok.begin()); pos != tok.end(); ++pos)
+	{	cout << "[" << *pos << "]"; }
+	cout << endl;
+}
+
+eg: char *str = "Link ;; <master-sword> zelda";
+    char_separator<char> sep;
+	tokenizer<char_separator<char>,char*> tok(str,str+strlen(str),sep);
+	print(tok);
+	tok.assign(str,str+strlen(str),char_separator<char>(" ;-","<>"));
+	print(tok);
+	tok.assign(str,str_strlen(str),char_separator<char>(" ;-<>","",keep_empty_tokens));
+	print(tok);
+--------------------
+[Link][;][;][<][master][-][sword][>][zelda]
+[Link][<][master][sword][>][zelda]
+[Link][][][][master][sword][][zelda]
+5.14.2 escaped_list_separator 专门处理CSV格式的分词对象
+escaped_list_separator(char e='\\',char c= ',',char q='\"')
+eg: string str = "id,100,name,\"mario\"";
+escaped_list_separator<char> sep;
+tokenizer<escaped_list_separator<char> > tok(str,sep);
+print(tok);
+--------------------
+[id][100][name][mario]
+
+5.14.3 offset_separator:处理某些不使用分隔符而使用固定字段宽度的文本时很有用。
+template <typename Iter>
+offset_separator(Iter begin,Iter end,bool wrap_offsets=true,bool return_partial_last=true);
+//wrap_offsets决定在偏移量使用完后是否继续分词,return_partial_last决定在偏移量序列最后是否返回分词
+//不足的部分。
+eg:string str = "2233344445";
+int offsets[] = {2,3,4};
+offset_separator sep(offsets,offsets+3,true,false);
+tokenizer<offset_separator> tok(str,sep);
+print(tok);
+tok.assign(str,offset_separator(offsets,offsets+3,false));
+print(tok);
+str += "56667";
+tok.assign(str,offset_separator(offsets,offsets+3),true,false));
+print(tok);
+----------------
+[22][333][4444][5]
+[22][333][4444]
+[22][333][4444][55][666] //for: [7] 是偏移量序列的最后一个元素，所有不被输出。
+
+5.15 tokenizer库的缺陷
+只支持单个字符进行分词,如分解"||"等多个字符组成的分隔符则无能为力。
+对 wstring(unicode) 支持不好。
+所以正则表达式和string_algo通常都比tokenizer工作得更好。
+
+5.16 xpressive：正则表达式,解决文本处理领域的:验证，匹配，查找，替换等。
+比原正则表达式库boost.regex速度快，不需要编译，语法类似。
+
+5.16.1 xpressive提供3个重要的类:basic_regex,match_results,sub_match
+1.basic_regex
+typedef basic_regex<std::string::const_iterator> sregex;
+typedef basic_regex<char const *> cregex;
+2.match_results
+typedef match_results<std::string::const_iterator> smatch;
+typedef match_results<char const *> cmatch;
+
+5.16.2 regex_match():检查一个字符串是否完全匹配一个正则表达式
+bool regex_match(string,basic_regex const & re);
+bool regex_match(string,match_results& what,basic_regex const & re);
+
+eg:#include <boost/xpressive/xpressive_dynamic.hpp>
+   int main(){
+	   using namespace boost::xpressive;
+	   cregex reg = cregex::compile("a.c"); //使用cregex类的工厂方法compile()创建一个正则表达式对象reg
+	   assert(regex_match("abc",reg));
+	   assert(!regex_match("ac",reg));
+   }
+eg2: cregex reg = cregex::compile("\\d{6}(1|2)\\d{3}(0\1)\\d[0-3]\\d\\d{3}(X|\\d",icase)); //匹配忽略大小写
+     assert(regex_match("510922199009084633",reg));
+regex_match可以替代部分string_algo的判断式算法的功能
+string str("readme.txt");
+sregex start_reg = sregex::compile("^re.*"); //匹配开头
+sregex end_reg   = sregex::compile(".*txt$");//匹配末尾
+assert(regex_match(str,start_reg));
+assert(regex_match(str,end_reg));
+
+5.16.3 regex_search(): regex_match要求输入字符串必须与正则表达式完全匹配，regex_search则检查输入表达式中是否包含正则表达式。
+即存在一个匹配正则表达式的字串。其调用形式和regex_match()完全相同，但不要求完全匹配，找到匹配字串就返回true。
+eg: #include <boost/xpressive/xpressive_dynamic.hpp>
+    int main(){
+		using namespace boost::xpressive;
+		char *str = "there is a POWER-suit item";
+		cregex reg = cregex::compile("(power)-(.{4})",icase);
+		assert(regex_search(str,reg));
+		cmatch what;
+		regex_search(str,what,reg);
+		assert(what.size() == 3);
+		cout << what[1] << what[2] << endl;
+		assert(!regex_search("error message"),reg));
+	}
+note: regex_search可替代string_algo的contains,starts_with,ends_with和查找算法
+eg: string str("readme.TXT");
+    sregex start_reg = sregex::compile("^re");
+	sregex end_reg   = sregex::compile("txt$",icase);
+	assert(regex_search(str,start_reg));			 //starts_with
+	assert(regex_search(str,end_reg));				 //ends_with
+	assert(regex_search(str,cregex::compile("me"))); //contains
+
+5.16.4 regex_replace()
+eg: #include <boost/xpressive/xpressive_dynamic.hpp>
+    int main(){
+		using namespace boost::xpressive;
+		string str("readme.txt");
+		sregex reg1 = sregex::compile("(.*)(me)");
+		sregex reg2 = sregex::compile("(t)(.)(t)");
+
+		cout << regex_replace(str,reg1,"manual") << endl;
+	}
+	----------------
+	manual.txt
+	5.16.5 迭代器模板类:regex_iterator<>,可替代string_algo库的查找算法和查找迭代器
+	eg: #include <boost/xpressive/xpressive_dynamic.hpp>
+	    int main(){
+			using namespace boost::xpressive;
+			string str("Power-bomb,power-suit,pOwer-beam all items\n");
+			sregex reg = sregex::compile("power-(\\w{4})",icase);
+			sregex_iterator pos(str.begin(),str.end(),reg);
+			sregex_iterator end;
+			while(pos != end){
+				cout << "[" << (*pos)[0] << "]"; //operator*返回一个match_results对象,因为操作符号优先级所以需要()
+				++pos;
+			}
+		}
+	-------------------	
+	[Power-bomb][power-suit][pOwer-beam]
+5.16.6 分词: regex_token_iterator<>同regex_iterator<>返回匹配的字符串,构造最后一个参数-1，会将匹配的字符串视为分隔符,
+如果是正数，则返回匹配结果的第args个字串。regex_token_iterator解引用返回的是一个sub_match对象而不是match_results对象。
+eg: #include <boost/xpressive/xpressive_dynamic.hpp>
+    int main(){
+			using namespace boost::xpressive;
+			char *str = "*Link*||+Marior+||Zelda!!!||Metroid";
+			cregex reg = sregex::compile("\\w+",icase); //查找所有的单词，无视标点符号
+			cregex_token_iterator pos(str,str+strlen(str),reg);
+			while( pos != cregex_token_iterator()){
+				cout << "[" << *pos << "]"; ++pos;
+			}
+			cout << endl;
+		}
+		cregex split_reg = cregex::compile("\\|\\|");
+		pos = cregex_token_iterator(str,str+strlen(str),split_reg,-1); //使用分隔符正则表达式，分隔符是"||"
+		while( pos != cregex_token_iterator()){
+			cout << "[" << *pos << "]"; ++pos;
+		}
+----------------
+[Link][Mario][Zelda][Metroid]
+[*Link*][+Mario+][Zelda!!!][Metroid]
+
+第六章 正确性与测试
+6.1 static_assert库提供静态断言(编译器诊断)，boost.test库构建了完整的单元测试
+eg: #include <boost/assert.hpp>
+    double func(int x){
+		BOOST_ASSERT(x != 0 && "divided by zero"); //断言失败的描述信息
+		return 1.0/x;
+	}
+6.2 禁用断言:
+eg: #define BOOST_DISABLE_ASSERTS
+	#include <cassert>
+	#include <boost/assert.hpp>
+	double func(int x){
+		BOOST_ASSERT(x != 0 && "divided by zero"); //失效
+		cout << "after BOOST_ASSERT" << endl;
+		assert(x != 0 && "divided by zero"); //有效
+		cout << "after" << endl;
+		return 1.0/x;
+	}
+6.3 统一错误处理方式：在头文件<boost/assert.hpp>之前定义宏BOOST_ENABLE_ASSERT_HANDLER,这样断言表达式
+无论在debug还是release模式下都将被求值，如果断言失败，会发生一个断言失败的函数调用boost::assertion_failed()。
+eg: #include <boost/format.hpp>
+    namespace boost{
+		void assertion_failed(char const *expr,char const * function,char const * file,long line){
+			boost::format fmt("Assertion failed!\n Expression: %s\nFunction: %s\nFile: %s\nLine: %ld\n\n");
+			fmt % expr % function % file % line;
+			cout << fmt;
+		}
+	}
+	#define BOOST_ENABLE_ASSERT_HANDLER
+	#include <boost/assert.hpp>
+	double func(int x){...}
+	int main(){
+		func(0); //error
+	}
+-----------------
+Assertion failed!
+Expression: x != 0 && "divided by zero"
+Function:double __cdecl func(int)
+File: d:\vc\main.cpp
+Line: 61
+
+6.4 BOOST_VERIFY:和BOOST_ASSERT相同，只是断言的表达式一定会被求值(断言运算，验证函数返回值时)。
+eg: #include <boost/assert.hpp>
+    int len;
+	BOOST_VERIFY(len = strlen("123"));
+
+6.5 static_assert:编译器断言，而assert和BOOST_ASSERT是运行时断言，必须是一个能执行的语句，只能在函数域里出现，
+而BOOST_STATIC_ASSERT则可以出现在程序的任何位置：名字空间域，类域或函数域。
+eg: 定义了一个简单的模板函数my_min，出于某种目的，它仅支持short或char的类型
+#include <boost/static_assert.hpp>
+template<typename T>
+T my_min(T a,T b){
+	BOOST_STATIC_ASSERT(sizeof(T) < sizeof(int)); //静态断言，仅支持short或char
+	return a < b ? a : b;
+}
+int main(){
+	cout << my_min((short)1,(short)3); //ok
+	cout << my_min(1L,3L);			   //编译期间错误
+}
+BOOST_STATIC_ASSERT在类域和名字空间域的使用方式与在函数域的使用方式相同。
+eg:
+namespace my_space{
+	class empty_class{
+		BOOST_STATIC_ASSERT(sizeof(int) >= 4); //类域中静态断言要求int至少4个字节
+	};
+	BOOST_STATIC_ASSERT(sizeof(empty_class) == 1); //名字空间域静态断言，空类至少有一个char成员变量。
+}
+
+6.6 test库:提供了一个用于单元测试的基于命令行界面的测试套件Unit Test Framework(UTF)，检测内存泄漏，程序运行监控。
+6.6.1 最小化的测试套件（要测试的接口不超过10个）:minimal test,只需要包含<boost/test/minimal.hpp>就可以使用，
+不具有通用性和其他断言的好处，尽量少使用。
+BOOST_CHECK()  :断言测试通过，如不通过不影响程序执行。
+BOOST_REQUIRE():要求测试必须通过，否则程序停止执行。
+BOOST_ERROR(message): 给出一个错误信息，程序继续执行。
+BOOST_FAIL(message): 给出一个错误信息，程序运行终止。
+
+eg:#include <boost/test/minimal.hpp>
+   #include <boost/format.hpp>
+   #include <iostream>
+   int test_main(int argc, char* argv[]){
+	   using namespace boost;
+	   format fmt("%d-%d");
+	   BOOST_CHECK(fmt.size() != 0); //断言fmt已经初始化
+	   fmt % 12 % 34;
+	   BOOST_REQUIRE(fmt.str == "12-34"); //验证格式化结果
+	   BOOST_ERROR("演示一条错误信息");    //不影响程序的执行
+	   fmt.clear();
+	   fmt % 12;
+	   try{
+		   std::cout << fmt; //输入参数不完整，抛出异常
+	   }catch(...){
+		   BOOST_FAIL("致命错误，测试终止");
+	   }
+	   return 0;
+   }
+6.7 单元测试框架UTF
+6.7.1 类似BOOST_ASSERT的测试断言: BOOST_XXX_YYY,XXX断言的级别WARN是警告级，CHECK是检查级别,REQUIRE是最高的级别。
+YYY各种具体的测试断言：相等/不等，抛出/不抛出异常，大于或小于等
+BOOST_XXX_EQUAL(l,r)
+BOOST_XXX_CLOSE: 浮点数的相等比较。
+BOOST_XXX_GE(l,r): l >= r
+BOOST_XXX_THROW(expr,exception):检测表达式expr抛出指定的exception异常
+BOOST_XXX_NO_THROW(expr,exception):检测表达式expr不抛出指定的exception异常
+BOOST_XXX_MESSAGE(expr,message):与不带message后缀的断言相同，但测试失败时给出指定的消息
+BOOST_TEST_MESSAGE(message) 仅输入通知用的消息，不含有任何警告或错误，默认情况不显示。
+
+6.7.2 测试用例与套件: test 库将测试程序定义为一个测试模块，由测试安装，测试主体，测试清理和测试运行器四个部分组成。
+eg: BOOST_AUTO_TEST_SUITE(s_suitel) //测试套件开始
+    BOOST_AUTO_TEST_CASE(t_case1)   //创建测试用例(t_)：测试用例1 
+	{
+		BOOST_CHECK_EQUAL(1,1);
+		...//其他断言测试
+	}
+	BOOST_AUTO_TEST_CASE(t_case2)   //测试用例2
+	{
+		BOOST_CHECK_EQUAL(5,10/2);
+		...//其他断言测试
+	}
+	BOOST_AUTO_TEST_SUITE_END()     //测试套件结束
+
+6.7.3 完整的单元测试程序如下:
+#define BOOST_TEST_INCLUDE
+#include <boost/test/unit_test.hpp>
+#include <boost/smart_ptr.hpp>
+using namespace boost;
+BOOST_AUTO_TEST_SUITE(s_smart_ptr) //开始测试套件s_smart_ptr
+BOOST_AUTO_TEST_CASE(t_scoped_ptr) //测试用例1:t_scoped_ptr
+{
+	scoped_ptr<int> p(new int(874));
+	BOOST_CHECK(p);
+	BOOST_CHECK_EQUAL(*p,874);
+	p.reset();  //scoped_ptr复位
+	BOOST_CHECK(p == 0);
+}
+BOOST_AUTO_TEST_CASE(t_shared_ptr)
+{
+	shared_ptr<int> p(new int(100));
+	BOOST_CHECK(p);
+	BOOST_CHECK_EQUAL(*p,100);
+	BOOST_CHECK_EQUAL(p.use_count(),1);
+	shared_ptr<int> p2 = p;
+	BOOST_CHECK_EQUAL(p,p2);
+	BOOST_CHECK_EQUAL(p2.use_count(),2);
+	*p2 = 255;
+	BOOST_CHECK_EQUAL(*p,255);
+	BOOST_CHECK_GT(*p,200);
+}
+BOOST_AUTO_TEST_SUITE_END()
+
+6.7.4 测试夹具：测试用例和测试套件构成单元测试的主体，满足大部分单元测试的功能需求，但不能完成测试安装和测试清理的任务。
+定义一个夹具类，只有构造和析构，用于执行测试安装和测试清理。指定测试用例和测试套件的夹具类需要使用另外2个宏:
+#define BOOST_FIXTURE_TEST_SUITE(suite_name,F) //替换BOOST_AUTO_TEST_SUITE
+#define BOOST_FIXTURE_TEST_CASE(test_name,F)   //替换BOOST_AUTO_TEST_CASE
+eg:#define  BOOST_TEST_INCLUDE
+   #include <boost/test/unit_test.hpp>
+   #include <boost/assign.hpp>
+   using namespace boost;
+   struct gloabl_fixture{ //全局测试夹具类
+	   gloabl_fixture() { cout << ("gloabl setup\n");}
+	   ~gloabl_fixture() { cout << ("gloabl teardown\n");}
+   };
+   BOOST_GLOBAL_FIXTURE(gloabl_fixture); //定义全局夹具:可被应用于整个测试模块的所有测试套件
+   struct assign_fixture{ //测试套件夹具类
+	   assign_fixture() {cout << ("suit setup\n");}
+	   ~assign_fixture() {cout << ("suit teardown\n");}
+	   vector<int> v; //所有测试用例可用的成员变量
+   };
+   BOOST_FIXTURE_TEST_SUITE(s_assign,assign_fixture) //测试套件级别的夹具:套件内的所有子套件和测试用例都自动使用夹具类提供的安装和清理功能。
+   BOOST_AUTO_TEST_CASE(t_assign1)
+   {
+	   	using namespace boost::assign;
+		v += 1,2,3,4;
+		BOOST_CHECK_EQUAL(v.size(),4);
+		BOOST_CHECK_EQUAL(v[2],3);
+   }
+   BOOST_AUTO_TEST_CASE(t_assign2)
+   {
+	   using namespace boost::assign;
+	   push_back(v)(10)(20)(30);
+	   BOOST_CHECK_EQUAL(v.empty(),false);
+	   BOOST_CHECK_LT(v[0],v[1]);
+   }
+   BOOST_AUTO_TEST_SUITE_END()
+   --------------------------------
+   global setup
+   Running 2 test cases...
+   suit setup
+   suit teardown
+   suit setup
+   suit teardown
+   gloabl teardown
+   *** No errors detected
+
+6.7.5 函数执行监视器类:execution_monitor,监控某个函数的执行，即使函数发生预想以外的异常，也能保证程序不受影响的正常运行，异常
+将会以一致的方式被execution_monitor处理。
+用法:可监控返回值为int或可转换为int的函数，并需要使用unit_test::callback0<int>函数对象来包装.如果发生了未捕获的异常、软硬件
+signal或trap或VC下的assert断言,execution_monitor会捕获这个异常并重新抛出一个execution_exception异常。
+eg:#define BOOST_TEST_INCLUDE
+   #include <boost/test/execution_monitor.hpp>
+   #include <boost/test/utils/basic_cstring/io.hpp> //const_string使用流输出功能需要包含的头文件
+   using namespace boost;
+   int f(){  //一个简单的测试函数，必须是无差返回值为int
+	cout << "f execute." << endl;
+	throw "a error accoured"; //抛出一个未捕获的异常
+	return 10;
+   }
+   int main(){
+	   exception_monitor em;
+	   try{
+		   em.execute(unit_test::callback0<int>(f));
+	   }catch(execution_exception &e) //execution_exception不是标准库异常std::exception的子类
+	   {
+		   cout << "execution_exception" << endl;
+		   cout << e.what().begin() << endl; //execution_exception被设计为在很少或没有内存的情况下也可以使用，
+		   									 //故没有使用std::string来表示字符串,而是使用内部类const_string
+		   
+	   }
+   }
+-------------------
+f execute
+execution_exception
+C string: a error accoured
+
+其他用法: execution_monitor可用于统一处理程序的异常，使用户不必自己编写错误处理代码，在此种情况下，程序抛出的异常类型必须
+是C字符串、std::string或者std::exception,才能被execution_exception所处理。
+异常类的翻译函数:使用自定义的异常类并利用执行监控器的监控功能
+eg:struct my_error{ //一个自定义异常类
+   int err_code;
+   my_error(int ec):err_code(ec){}
+};
+void translate_my_err(const my_error& e){ //翻译函数
+	cout << "my err = " << e.err_code << endl;
+}
+int f(){
+	cout << "f execute." << endl;
+	throw my_error(100);	//抛出自定义异常
+	return 0;
+}
+int main(){
+	execution_monitor em;
+	em.register_exception_translator<my_eror>(&translate_my_err); //使用register_exception_translator注册异常翻译函数
+	try{
+		em.execute(unit_test::callback0<int>(f));
+	}catch(const execution_exception& e){
+		cout << "execute_exception" << endl;
+		cout << e.what().begin();
+	}
+}
+-------------
+f execute.
+my err = 100
