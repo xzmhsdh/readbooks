@@ -1,0 +1,281 @@
+Pit: g++ 编译 c++需要[ g++ -std=c++11 -filename -o -exe]
+
+　第２章
+１．Big-O标记：输入量足够大才有意义
+　　  O(1):　常量，运行时间与元素个数无关．
+　　　 O(log(n)): 对数, 运行时间与元素个数的增加呈对数增长．
+　　　　O(n):线性,运行时间随元素个数的增加呈线性增长．
+　　　 O(nlog(n)): 运行时间随元素个数的增加呈　线性与对数的乘积　增长
+　　　 O(n2):二次方，运行时间随元素个数的增加呈平方增长
+
+第３章　C++ 11 的新特性
+3.1 新的特性
+１．在两个template　表达式的闭符之间放一个空格的要求已经过时了．
+　　　　vector<lit<int> >;//ok in each c++ version
+    vector<list<int>>;//ok since c++11
+2.std::nullptr_t和nullptr,nullptr可被自动转换为各种pointer类型,但不会被转换为任何整数类型．
+  std::nullptr_t:在c++11中是一个基础类型
+　　eg: void f(int); void f(void*); 
+      f(0); //calls f(int)  f(NULL); //calls f(int) NULL == 0
+      f(nullptr); //calls f(void*);
+3.auto　完成类型自动推导:以auto声明的变量其类型会根据其初始值被自动推导出来，需要一个初始化操作．
+  eg: static auto vat = 0.19
+  eg: vector<string> v; auto pos = v.begin(); // pos has type vector<string>::iterator
+  eg: auto L = [] (int x) -> bool {...}; // L has the type of a lambda taking an int and returning a bool.
+
+4.初值列:会使某个属于某种基础类型(通常有不明确的初值)也会被初始化为０或nullptr
+eg: int values[]{1,2,3};
+    std::vector<int> v{2,3,4,5,7};
+    std::vector<std::string> cities{ "Berlin","New York","London"};
+    std::complex<double> c{4.0,3.0} 
+eg: int i ; // i has undefined value
+    int j{}; //j is initialized by 0
+    int *p;  // p has undefined value;
+    int *1q{}; // q is initialized by nullptr
+窄化(narrowing)：精度降低或造成数值变动，对{}不成立
+eg: int x(5.3); //ok  int x2 = 5.3; //ok
+    int x3{5.0};//error int x4= {5.3};// error
+    char c{7}; //ok but char c2{999999};//error
+    std::vector<int> v1{1,2,3,4};  //ok
+    std::vector<int> v2{1,2.3,4,5.6}; //error
+用户自定义类型的初值列:class template std::initializer_list<>来支持a list of values
+进行初始化.
+eg: void print(std::initializer_list<int> vals)
+{
+   for (auto p = vals.begin(); p != vals.end(); ++p){
+     std::cout << *p << "\n";
+   }
+}
+print({13,3,2,3,12,37});
+　
+当实参数和初值列的构造函数同时存在时，初值列优先
+eg: class p{
+      public:
+        P(int,int);
+        P(std::initializer_list<int>);
+    };
+    P p(77,5); //calls P::P(int,int)
+    P q{77,5}; //calls P::P(initializer_list)
+    P r{77,5,43}; //calls P::P(initializer_list)
+    P s = {77,5}; //calls P::P(initializer_list)
+explicit令多个数值自动转换不起作用
+eg: class P{
+      public:
+         P(int a,int b){}
+         explicit P(int a,int b,int c){}
+    };   　
+    P x(77,5); //ok    P y{77,5}; //ok
+    P z{77,5,43} //pk  P v = {77,5}; //ok
+    P w = {77,5,43}; //error due to explicit
+    void fp(const P&);
+    fp({47,11}); //ok  fp({47,11,3}); //error due to explicit
+    fp(p{47,11}); //ok fp(P{47,11,3}); //ok
+5. for: range,array,collection 
+ for (decl : coll){
+   statement
+ }
+ eg: for (int i : {2,3,4,5,6,7,8,19}){
+     std::cout << i << std::endl;
+ }
+ eg:将每个元素ele*3
+ std::vector<double> vec;
+ for (auto& elem : vec){ //not use & ,will do it on a local copy.
+     elem *= 3;
+ }
+
+为了避免调用每个元素的copy构造和析构，通常将当前元素声明为const reference
+eg: template <typename T>
+    void printElements(const T& coll)
+    {
+      for (const auto& elem : coll){
+        std::cout << elem << std::endl;
+      }
+    }
+初值列的std::initializer_list<>提供begin()和end()，所以可用range-based-for
+使用C-style array:
+int array[] = {1,2,4,4,5,};
+long sum  = 0;
+for (int x : array){
+  sum += x;
+}
+for (auto elem: {sum, sum*2 ,sum*4}){
+   std::cout << elem << std::endl;
+}
+
+元素在for循环中被初始化为decl不得有任何显式类型转换
+class C{
+  public:
+    explicit C(const std::string& s); 
+};
+std::vector<std::string> vs;
+for (const C& elem: vs){ //ERROR: no conversion from string to C defined.
+  std::cout << elem << std::endl;
+}
+
+6.Move语义和Rvalue reference:　避免非必要的拷贝和临时对象
+X x;
+coll.insert(x); //insert copy of x
+...
+coll.insert(x+x);
+...
+coll.insert(x);  //coll内部无需为它建立一份copy,当ｘ的复制成本高昂时,可用std::move
+-->coll.insert(std::move(x));
+std::move:本身不做任何moving工作，只是将实参转成一个所谓的rvalue reference(X&&)新类型．
+其含义是:rvalue(不具名的临时对象只能出现于赋值操作的右侧)可被改动内容，它是一个不再被需要的
+(临时)对象，所以你可以"偷"其内容和或资源．
+eg: 重载insert()
+    namespace std{
+      template <typename T,...> class set{
+        public:
+           ... insert(const T& x); //for lvalues:copies the value
+           ... insert(T&& x);      //for rvalues:moves the value
+      }
+    }
+
+c++ 11标准库实现并包含了move构造函数，如果move构造函数不存在，则copy构造函数会被用上．
+c++标准库的class保证了:在一次move之后，对象处于有效但不确定状态，可在move之后对它赋值但当前值
+不确定(?),STL容器保证了被搬移的内容，搬移后其值为空．
+
+X foo(){
+  X x;
+  ...
+  return x;
+}
+如果X有一个可取用的copy或move构造函数，编译器可省略其中的copy版本．
+否则，如果X有一个move构造函数，X就被moved
+否则，如果有一个copy构造函数，X被copied
+否则，编译期错误
+
+X&& foo(){ //rvalue reference也是个reference，不能返回一个local对象．
+  X x;
+  ...
+  return x;
+}
+
+７．新字符串字面常量:raw string,multibyte/wide-character
+eg:两个反斜线和一个ｎ:"\\\\n" 或 R"(\\n)"
+如果需要在raw string 内写出")":R"delim(...)delim"
+==>R"nc(a\ 
+        b\nc()"
+        )nc"; ==> "a\\\n     b\\nc()\"\n      "
+
+8. noexcept:　指明某个函数无法或不打算抛出异常
+eg: void foo() noexcept; //如果foo()抛出异常，程序会被终止，std::terminate()
+被调用并默认调用std::abort(),c++1１起不再鼓励使用异常明细．
+在某种指定的条件下函数不抛出异常:
+void swap(Type &x,Type &y) noexcept(noexcept(x.swap(y))){
+  x.swap(y);
+}
+
+9.constexpr:　让表达式在编译期求值
+constexpr int square(int x){
+  return x * x;
+}
+float a[square(9)]; // ok since c++ 11: a has 81 elements.
+在c++98中的一个bug:std::numeric_limits<short>::max(),虽然功能上等同于宏
+INT_MAX,　当无法被用作一个整数常量．
+
+10.Alias Template:带别名的模板,Template typedef
+eg: template <typename T>
+    using Vec = std::vector<T,MyAlloc<T>>; //standard vector using own alloator
+    Vec<int> coll; ==> std::vector<int,MyAlloc<int>> coll;
+
+11.Lambda:是一份功能定义式，被定义于语句或表达式内部
+eg: [] {
+    std::cout << "hello lambda" << std::endl;
+}
+可直接调用:
+ [] {
+    std::cout << "hello lambda" << std::endl;
+ }();
+或把它传递给对象:
+auto l = []{
+   std::cout << "hello lambda" << std::endl;
+};
+l(); //prints "hello lambda"
+形式 : [...] {...}
+      [...] (...) mutable,throwSpec,retType {...}
+auto l = [](const std::string &s){
+  std::cout << s << std::endl;
+};
+l("hello lambda");
+------------------
+Lambda可以返回值，但无需指明返回类型:
+[] { return 42; }
+[] () -> double { return 42; } //指明返回一个double类型．
+
+Capture:用以访问外部作用域,[=]:　外部作用域以by value方式传递给lambda
+                        [&]: by reference传递给lambda
+int x = 0; 
+int y = 42;
+auto qqq = [x, &y]{
+        std::cout << "x: " << x << std::endl;
+        std::cout << "y: " << y << std::endl;
+        ++y;
+};
+x = y = 77; //ｘ必须在labmda定义之前设置 labmda参数的初始值
+qqq();
+qqq();
+std::cout << "final y: " << y << std::endl;
+------
+x:0 y: 77   x:0 y : 78  final y: 79
+
+－－－－
+passing by value 和  passing by reference的混合体,可以将lambda声明为mutable
+eg: int id = 0;
+    auto f = [id] () mutable{
+        std::cout << "id: " << id << std::endl; ++id;
+    };
+    id = 42;
+    f();
+    f();
+    f();
+    std::cout << id << std::endl;
+    -----
+    id: 0  id: 1  id: 2   42
+    －－－－－－－
+Lambda类型:是个不具名function object(functor),可用std::function<> class template
+指明一个一般化类型给functional programming,它提供了可以明确指出函数的返回类型为lambda的
+唯一方法:
+#include <functional>
+#include <iostream>
+std::function<int(int,int)> returnLambda()
+{
+   return [](int x,int y){
+        return x*y;
+   };
+}
+
+int main()
+{
+  auto lf = returnLambda();
+  std::cout << lf(6,7) << std::endl;
+  return 0;
+}
+
+12.decltype <--> typeof缺乏一致性又不完全
+eg:　int main(){
+    std::map<std::string,float> coll;
+    decltype(coll)::value_type elem;
+    decltype(coll) e;
+    e.insert(std::make_pair("test",12.3));
+    cout << e["test"] << endl;
+    return 0;
+}
+应用:声明返回类型或用来传递一个lambda类型
+   
+13.新的函数声明语法
+tempalte <typename T1, typename T2>
+auto add(T1 x, T2 y) -> decltype(x+y);
+
+14.Scoped Enumeration
+enum class Salutation : char {mr,ms,co,none};
+优点:
+1).绝对不会隐式转换至/自int
+2).如果数值(mr)不在enumeration被声明的作用域内，必须改写为Salutation::mr．
+3).定义低层类型char,默认int
+4).前置声明enumeration type，如果只有类型被使用的话 
+
+15.新的基础类型: char16_t/char32_t/long long /unsigned long long /std::nullptr_t
+
+3.2
