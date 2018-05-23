@@ -278,4 +278,182 @@ enum class Salutation : char {mr,ms,co,none};
 
 15.新的基础类型: char16_t/char32_t/long long /unsigned long long /std::nullptr_t
 
-3.2
+3.2 虽旧犹新的语言特性
+1).Nontype Template Param(非类型模版参数)
+为template使用nontype parameter,它也被视为template类型的一部分。
+eg: bitset<32> flags32; bitset<50> flags50;
+这些bitset有着不同的类型，因为他们使用不同的template参数，所以不可对上述二者进行赋值或比较。
+除非他们之间有一个相应的类型转换。
+2).Default Template Param(模板参数默认值)
+eg: template<typename T,typename container = vector<T>>
+    class MyClass;
+如果只传入一个实参,第二个实参会采用默认值: MyClass<int> x; <==> MyClass<int,vector<int>>;
+3).关键字typename: 一般规则就是template内的任何标识符都被视为一个value除非为它加上typename。
+eg: template <typename T>
+    class MyClass{
+      typename T::SubType *ptr; //阐明SubType是个类型，定义于class T内。因此ptr是个pointer
+      //指向类型T::SubType,如果没有typename,SubType会被视为一个static成员：类型为T的数值SubType
+      //乘以ptr。
+    };
+note:基于SubType必须是个类型，任何被用来替换T的类型，都必须提供一个内层类型SubType:
+class Q{
+  typedef int SubType;
+  ...
+};
+MyClass<Q> x; //ok,ptr is pointer to int
+
+4).Member Template(成员模版)
+class的成员函数可以是模板，但成员模版不可以是virtual。
+4.1).支持class tempalte内的成员之间的自动类型转换
+eg: tempalte <typename T>
+    class MyClass{
+     private:
+        T value;
+     public:
+        void assign (const MyClass<T> & x){ // x must have same type as *this
+          value  = x.value;
+        }
+    };
+4.2)非必须的精确吻合:为成员函数提供一个不同的template类型
+eg: tempalte <typename T>
+    class MyClass{
+      private:
+        T value;
+      public:
+        tempalte <typename X>             // memeber tempalte
+        void assign(const MyClass<X> &x){ //allows different tempalte types
+           value = x.getValue();
+        }
+        T getValue() const {
+          return value;
+        }
+    };
+4.3)特殊的template构造函数，通常被用于对象被复制时给予隐式类型转换。
+note:template构造函数并不压制copy构造函数的隐式声明，如果类型完全吻合，隐式的copy构造函数会被生成出来。
+eg: tempalte <typename T>
+    class MyClass{
+       public:
+         tempalte <typename U>
+         MyClass(const MyClass<U>& x);
+    };
+    void f(){
+      MyClass<double> xd;
+      MyClass<double> xd2(xd); //call implicitly generated copy constructor
+      MyClass<int> xi(xd); //calls tempalte constructor
+    }
+5).Nested(嵌套式)Class Template
+tempalte <typename T>
+class MyClass{
+  ...
+  tempalte <typename T2>
+  class NestedClass;
+}
+
+3.2.1 明确初始化的基础类型:使用一个明确的构造函数调用但不给实参。
+int i1; //undefined value 
+int i2 = int(); //initialized with zero
+
+3.2.2 main()定义式
+唯一正确且具移植性的main():
+1).int main() { ... }
+2).int main(int argc,char* argv[]){ ... }
+note:你可以但非必要以一个return语句终止main(),不同于C，C++定义了一个隐晦的return 0;
+如果不想以main返回的方式结束C++程序，通常应该调用exit(),quick_exit()或terminate();
+
+第四章 一般概念
+1.命名空间std
+using std::cout;
+using std::endl;
+using namespace std; //在复杂的代码中，可能导致意外的命名冲突，或由于某些晦涩的重载规则甚至导致不一样的行为。
+2.头文件的名称和格式
+#include <iostream>
+#include <cstdlib> 、#include <cstring>
+3.差错和异常处理的一般概念
+针对逻辑差错的异常类总是派生自logic_error: invalid_argument,length_error,out_of_range,domain_error。<stdexcept>
+针对运行期差错的异常类派生自runtime_error(不在程序作用域内且不容易回避的事件):range_error,overflow_error,underflow_error
+自C++11起,system_error指出因底层OS而发生的差错:并发环境，控制data race以及async()抛出这个异常。
+标准库可能抛出的所有异常类头文件:
+#include <exception>  // for classes exception and bad_exception
+#include <stdexcept>  // for most logic and runtime error classes
+#include <system_error> // for system errors(since c++ 11)
+#include <new>  // for out-of-memory exception
+#include <ios> // for I/O exception
+#include <future> // for errors with async() and future(since c++11)
+#include <typeinfo> // for bad_cast and bad_typeid
+try {
+  ...
+} catch (const std::exception& error) {
+  std::cerr << error.what() << std::endl;
+}
+3.1 以exception_ptr传递异常(C++11)
+#include <exception>
+std::exception_ptr eptr; //object to hold exception(or nullptr)
+void foo() {
+  try {
+     throw ..;
+  } catch (...) {
+    eptr = std::current_exception(); //save exception for later processing
+  }
+}
+void bar(){
+  if (epter != nullptr) {
+     std::rethrow_exception(eptr); // process saved exception
+  }
+}
+tips: current_exception返回exception_ptr对象，rethrow_exception()会重新抛出那个被存储的异常
+这个特性在我们打算在线程之间传递异常时特别有用。
+
+4.可被调用的对象
+1).一个函数，接受额外传入的args作为实参。
+2).一个指向成员函数的指针,对象被传递为第一实参(必须是reference或pointer),其他实参则一一对应成员函数参数。
+3).一个函数对象(function object，该对象拥有operator())，附带的args被传递为实参。
+4).一个lambda，函数对象
+eg: void func(int x,int y);
+    class C {
+      public:
+        void operator()(int x,int y) const;
+        void memfunc(int x,int y) const;
+    };
+    auto l = [] (int x, inty) {
+        ...
+    };
+    int main() {
+      C c;
+      std::shared_ptr<C> sp(new C);
+      //bind() uses callable object to bind arguments
+      std::bind(func,77,33)(); //calls: func(77,33)
+      std::bind(l,77,33)();    //calls: l(77,33)
+      std::bind(C(),77,33)();  //calls: C::operator()(77,33)
+      std::bind(&C::memfunc,c,77,33)(); //calls: c.memfunc(77,33)
+      std::bind(&C::memfunc,sp,77,33)(); //calls: sp->memfunc(77,33)
+      //async() uses callable object to start(background) tasks:
+      std::async(func,42,77); //calls: func(42,77)
+      std::async(l,42,77); //calls: l(42,77)
+      std::async(c,42,77); //calls: c.operator()(42,77)
+      std::async(&C::memfunc,&c,42,77); //calls: c.memfunc(42,77)
+      std::async(&C::memfunc,sp,42,77); //calls: sp->memfunc(42,77)
+    }
+
+5.并发及多线程的基本概念
+5.1多线程
+内核语言
+1).C++具备了这样一个内存模型: 保证当你修改"被不同的两个线程使用的"两个不同对象时，它们彼此独立。
+2).引入一个新关键字: thread_local,用来定义线程特定的变量和对象。
+标准库
+1).若干与线程安全相关的保证
+2).支持类和函数的并发运算(启动和同步多个线程)
+自c++11起，标准库对并发和多线程提供一般性规范:
+2.1).多个线程共享同一个对象而其中至少一个线程改动该对象时，会导致不明确行为，除非该类型被明确指定为
+"shareable without data races"或为它提供了一个locking机制。
+2.2).某个线程的对象构造期间，另一个线程使用了该对象。或在某个线程中析构对象，而另一个线程正在使用它。
+会导致不明确行为。这些甚至适用于针对线程同步而提供的对象。
+5.2并发
+1).对STL容器和容器适配器提供保证: 
+1.1).并发的只读访问是允许的。
+1.2).并发处理同一容器内的不同元素是可以的(除了class vector<bool>)
+1.3).对标准stream进行格式化输入和输出的并发处理是可能的。
+1.4).atexit()和 at_quick_exit(),getevn()的并发调用是同步的。
+1.5).默认分配器的所有成员函数除了析构，其并发处理都是被同步的。
+
+6.分配器扼要介绍
+分配器作为运用某种内存模型的技术方案的基础：如共享内存、垃圾回收、面向对象数据库等解决方案保持一致接口。
