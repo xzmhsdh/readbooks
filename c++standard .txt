@@ -457,3 +457,116 @@ eg: void func(int x,int y);
 
 6.分配器扼要介绍
 分配器作为运用某种内存模型的技术方案的基础：如共享内存、垃圾回收、面向对象数据库等解决方案保持一致接口。
+
+第五章 通用工具
+5.1 pair 
+1).自C++11可以对pair使用tuple-like接口,tuple_size<>::value获得元素个数,tuple_element<>::type元素类型,get()获得first或second
+eg: typedef std::pair<int,float> IntFloatPair; 
+    IntFloatPair p(42,3.14); 
+    std::get<0>(p); //yields p.first
+    std::get<1>(p);
+    std::tuple_size<IntFloatPair>::value //yields 2
+    std::tuple_element<0,IntFloatPair>::type //yields int
+2).构造函数和赋值
+std::pair<int,float> p; //initialized p.first and p.second with zero
+Copy构造2个版本: 接受相同类型的pair和member template(在构造过程中需要隐式类型转换)时被调用。
+eg: void f(std::pair<int,const char *>);
+    void g(std::pair<const int,std::string>);
+    ...
+    void foo() {
+      std::pair<int,const char *> p(42,"hello");
+      f(p); //calls implicitly generated copy constructor
+      g(p); //calls tempalte constructor
+    }
+note: 使用一个表达式如果明确指出类型，产生出来的pair将有绝对的类型,eg:
+std::pair<int,float>(42,7.77) != std::make_pair(42,7.77) //not float,but double
+c++新语义:
+1).move semantic: 
+   std::string s,t;
+   auto p = std::make_pair(std::move(s),std::move(t));
+2).reference semantic: ref() or cref()
+   #include <utility>
+   #include <funcitonal>
+   #include <iostream>
+   int i = 0;
+   auto p = std::make_pair(std::ref(i),std::ref(i));
+   ++p.first;
+   ++p.second;
+   std::cout << "i:" << i << std::endl;
+3).使用<tuple>的tie接口抽取pair的value
+   #include <utility>
+   #include <tuple>
+   #include <iostream>
+   std::pair<char,char> p = std::make_pair('x','y');
+   char c;
+   std::tie(std::ignore,c) = p; //第一个值忽略,将p的第二个值赋给引用c.
+Pair之间的比较:
+1).相等  namespace std {
+  tempalte <typename T1,typename T2>
+  bool operator==(const pairt<T1,T2>& x,const pair<T1,T2>& y) {
+    return x.first == y.first && x.second == y.second;
+  }
+}
+2). namespace std {
+  tempalte <typename T1, typename T2>
+  bool operator < (const pair<T1,T2>& x,const pairt<T1,T2>& y) {
+    return x.first < y.first || (!(y.first < x.first) && x.second < y.second);
+  }
+}
+5.2 Tuple 
+异质元素列,对Tuple的操作: make_tuple()创建,get<>()访问tuple的元素
+#include <tuple> #include <iostream> #include <complex> #include <string>
+using namespace std;
+int main { 
+  tuple<string,int,int,complex<double>> t; //element are init with default value(基础类型初始化为0)
+  tuple<int,float,string> t1(41,5.3,"nico");
+  for (int i = 0; i < 4; ++i) { //错误操作，不能迭代，必须在编译期知道处理元素的索引值
+    cout << get<i>(t1) << " "; 
+  }
+  auto t2 = make_tuple(22,44,"nico");
+  get<1>(t1) = get<1>(t2); //assign second value in t2 to t1
+  get<10>(t1): 无效索引，编译期报错
+}
+note: tuple元素类型可以是refrence:
+string s;
+tuple<string&> t(s); //first element of tuple t refers to s
+get<0>(t) = "hello"; // assign "hello" to s
+等价于:
+string s;
+make_tuple(ref(s));
+使用场景:
+1).reference 搭配 make_tuple()提取tuple的元素值
+std::tuple<int,float,std::string> t(77,1.1,"more light");
+int i; float f; std::string s;
+std::make_tuple(std::ref(i),std::ref(f),std::ref(s)) = t;
+等价于:
+std::tie(i,f,s)  = t; //tie会以i,f,s的ref建立一个tuple
+std::tile(i,std::ignore,s)  = t;
+初值列：
+std::tuple<int,double> t1(42,3.14); //ok,old syntax
+std::tuple<int,double> t2{42,3.14}; //ok,new syntax
+std::tuple<int,double> t3 = {42,3.14} //ERROR
+//不可以将初值列传至"期望获得一个tuple"的地方
+std::vector<std::tuple<int,float>> v{ {1,1,0},{2,2,0}}; //ERROR
+std::tuple<int,int,int> foo() {
+  return {1,2,3}; //ERROR
+}
+note：但对pair<>和容器(除array<>)是行得通的,
+std::vector<std::pair<int,float>> v1{ {1,1.0}, {2,2.0}}; //OK
+std::vector<std::vector<float>> v2{ {1,1.0},{2,2.9}}; //OK
+std::vector<int> foo2() {
+  return {1,2,3}; //OK
+}
+对于tuple，必须明确将初值转为一个tuple:
+std::vector<std::tuple<int,float>> v { std::make_tuple(1,1.9),std::make_tuple(2,2.9)}; //OK
+std::tuple<int,int,int> foo() {
+  return std::make_tuple(1,2,3); //ok
+}
+Tuple其他特性:
+tyepname std:tuple<int,float,std::string> TupleType;
+std::tuple_size<TupleType>::value  //yields 3
+std::tuple_element<1,TupleType>::type //yields float
+int n ;
+auto tt = std::tuple_cat(std::make_tuple(42,7.7,"hello"),std::tie(n));
+//tt成为一个tuple,拥有众多的tuple的所有元素，即便最后的元素是个reference to n;
+5.2智能指针
